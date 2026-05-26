@@ -26,8 +26,9 @@ pub use crate::liquidity::{calculate_liquidity_value, calculate_lp_tokens, calcu
 pub use crate::market::CreateMarketParams;
 pub use crate::storage_types::{
     ConditionalChain, ConditionalMarket, CreatorLeaderboardEntry, CreatorStats, DataKey,
-    Dispute, InviteCode, LPPosition, LeaderboardEntry, LeaderboardSnapshot, LiquidityPool,
-    Market, MarketStats, PlatformStats, Prediction, Season, SwapRecord, UserProfile,
+    Dispute, Event, EventMatch, EventPrediction, InviteCode, LPPosition, LeaderboardEntry,
+    LeaderboardSnapshot, LiquidityPool, Market, MarketStats, PlatformStats, Prediction,
+    Season, SwapRecord, UserProfile, Winner,
 };
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};

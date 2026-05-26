@@ -71,6 +71,29 @@ pub enum DataKey {
     ConditionalParent(u64),   // market_id -> u64 (parent_market_id)
     ConditionalChain(u64),    // market_id -> ConditionalChain
     ConditionalDepth(u64),    // market_id -> u32
+
+    // ── Creator Event keys ────────────────────────────────────────────────────
+    /// Global counter tracking the total number of creator events.
+    EventCounter,
+    /// Keyed by event_id. Stores the full Event struct.
+    Event(u64),
+    /// Keyed by event_id. Counter for matches within that event.
+    MatchCounter(u64),
+    /// Keyed by (event_id, match_id). Stores an EventMatch struct.
+    Match(u64, u64),
+    /// Keyed by (event_id, match_id, predictor). Stores an EventPrediction.
+    /// Named EventPrediction to distinguish from market Prediction(u64, Address).
+    EventPrediction(u64, u64, Address),
+    /// Keyed by user address. Vec of event_ids the user has joined.
+    UserEvents(Address),
+    /// Keyed by event_id. Vec of participant addresses for the event.
+    EventParticipants(u64),
+    /// Keyed by user address. Whether the address has passed verification.
+    VerifiedAddress(Address),
+    /// Keyed by event_id. Vec of Winner records for the event.
+    Winners(u64),
+    /// Singleton. Treasury balance separate from protocol fees.
+    TreasuryBalance,
 }
 
 #[contracttype]
@@ -573,4 +596,207 @@ impl ConditionalMarket {
 pub struct ConditionalChain {
     pub market_ids: Vec<u64>,
     pub depth: u32,
+}
+
+// ── Creator Event Types ───────────────────────────────────────────────────────
+
+/// Represents a sports prediction event created by a user.
+/// An event groups multiple matches; participants predict the winner of each match.
+/// Use DataKey::Event(event_id) to store and retrieve this struct.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Event {
+    /// Unique identifier assigned at creation via EventCounter.
+    pub event_id: u64,
+    /// Address of the creator who paid the creation fee.
+    pub creator: Address,
+    /// Human-readable event name (max 200 chars — validate with Event::is_valid_title).
+    pub title: String,
+    /// Extended description or rules (max 1000 chars — validate with Event::is_valid_description).
+    pub description: String,
+    /// XLM fee (stroops) paid by the creator when this event was created.
+    pub creation_fee_paid: i128,
+    /// Ledger timestamp when the event was created.
+    pub created_at: u64,
+    /// True while the event is open for participants and predictions.
+    pub is_active: bool,
+    /// True if the event was cancelled before resolution; refunds should be triggered.
+    pub is_cancelled: bool,
+    /// 8-character invite code used for private event access (stored as Symbol).
+    pub invite_code: Symbol,
+    /// Upper bound on participants; 0 means unlimited.
+    pub max_participants: u32,
+    /// Running count of unique addresses that have joined this event.
+    pub participant_count: u32,
+    /// Total number of matches added to this event so far.
+    pub match_count: u32,
+}
+
+impl Event {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        event_id: u64,
+        creator: Address,
+        title: String,
+        description: String,
+        creation_fee_paid: i128,
+        created_at: u64,
+        invite_code: Symbol,
+        max_participants: u32,
+    ) -> Self {
+        Self {
+            event_id,
+            creator,
+            title,
+            description,
+            creation_fee_paid,
+            created_at,
+            is_active: true,
+            is_cancelled: false,
+            invite_code,
+            max_participants,
+            participant_count: 0,
+            match_count: 0,
+        }
+    }
+
+    /// Returns true when the title length is within the 200-character limit.
+    pub fn is_valid_title(title: &String) -> bool {
+        title.len() <= 200
+    }
+
+    /// Returns true when the description length is within the 1000-character limit.
+    pub fn is_valid_description(description: &String) -> bool {
+        description.len() <= 1000
+    }
+}
+
+/// Represents a single match within a creator event.
+/// Use DataKey::Match(event_id, match_id) to store and retrieve this struct.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventMatch {
+    /// Unique identifier for this match within its parent event (assigned via MatchCounter).
+    pub match_id: u64,
+    /// ID of the event this match belongs to.
+    pub event_id: u64,
+    /// Ledger timestamp when this match was added to the event.
+    pub created_at: u64,
+    /// The verified match result: 0=TeamA, 1=TeamB, 2=Draw. None until resolved.
+    /// Uses u32 because Soroban contracttype does not support u8.
+    pub actual_winner: Option<u32>,
+    /// Set to true once actual_winner is recorded by the event creator or oracle.
+    pub is_resolved: bool,
+}
+
+impl EventMatch {
+    pub fn new(match_id: u64, event_id: u64, created_at: u64) -> Self {
+        Self {
+            match_id,
+            event_id,
+            created_at,
+            actual_winner: None,
+            is_resolved: false,
+        }
+    }
+
+    /// Records the final result and marks the match as resolved.
+    /// winner encoding: 0=TeamA, 1=TeamB, 2=Draw.
+    pub fn resolve(&mut self, winner: u32) {
+        self.actual_winner = Some(winner);
+        self.is_resolved = true;
+    }
+}
+
+/// Records a user's prediction for a single match in a creator event.
+/// predicted_winner encoding: 0=TeamA wins, 1=TeamB wins, 2=Draw.
+/// Use DataKey::EventPrediction(event_id, match_id, predictor) for storage.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventPrediction {
+    /// Address of the user who submitted this prediction.
+    pub predictor: Address,
+    /// ID of the parent event.
+    pub event_id: u64,
+    /// ID of the specific match within the event.
+    pub match_id: u64,
+    /// Predicted outcome: 0=TeamA, 1=TeamB, 2=Draw.
+    /// Uses u32 because Soroban contracttype does not support u8.
+    pub predicted_winner: u32,
+    /// Ledger timestamp when the prediction was submitted.
+    pub predicted_at: u64,
+    /// Graded result: Some(true) = correct, Some(false) = wrong, None = not yet graded.
+    pub is_correct: Option<bool>,
+}
+
+impl EventPrediction {
+    pub fn new(
+        predictor: Address,
+        event_id: u64,
+        match_id: u64,
+        predicted_winner: u32,
+        predicted_at: u64,
+    ) -> Self {
+        Self {
+            predictor,
+            event_id,
+            match_id,
+            predicted_winner,
+            predicted_at,
+            is_correct: None,
+        }
+    }
+
+    /// Returns false if the prediction has not been graded yet.
+    pub fn check_correct(&self) -> bool {
+        self.is_correct.unwrap_or(false)
+    }
+
+    /// Grades this prediction against the actual match result.
+    pub fn grade(&mut self, actual_winner: u32) {
+        self.is_correct = Some(self.predicted_winner == actual_winner);
+    }
+
+    /// Returns true if the predicted_winner value is valid (must be 0, 1, or 2).
+    pub fn is_valid_outcome(predicted_winner: u32) -> bool {
+        predicted_winner <= 2
+    }
+}
+
+/// Represents a verified winner of a creator event.
+/// A winner is a participant who correctly predicted every match in the event.
+/// Use DataKey::Winners(event_id) to store a Vec<Winner> for the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Winner {
+    /// Wallet address of the winning participant.
+    pub user: Address,
+    /// ID of the event in which this user achieved a perfect prediction score.
+    pub event_id: u64,
+    /// Count of matches the user predicted correctly (equal to event match_count for a perfect winner).
+    pub total_correct_predictions: u32,
+    /// Ledger timestamp when winner status was verified and recorded on-chain.
+    pub verified_at: u64,
+}
+
+impl Winner {
+    pub fn new(
+        user: Address,
+        event_id: u64,
+        total_correct_predictions: u32,
+        verified_at: u64,
+    ) -> Self {
+        Self {
+            user,
+            event_id,
+            total_correct_predictions,
+            verified_at,
+        }
+    }
+
+    /// Returns true if this winner has more correct predictions than `other`,
+    /// useful for sorting the winners list in descending order.
+    pub fn outranks(&self, other: &Winner) -> bool {
+        self.total_correct_predictions > other.total_correct_predictions
+    }
 }
