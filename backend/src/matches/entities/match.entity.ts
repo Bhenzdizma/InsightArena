@@ -21,6 +21,9 @@ export enum WinningTeam {
 @Index(['on_chain_match_id'], { unique: true })
 @Index(['event'])
 @Index(['result_submitted'])
+@Index(['result_submitted', 'match_time'])
+@Index(['match_time'])
+@Index(['submitted_by'])
 export class Match {
   @PrimaryGeneratedColumn('uuid')
   id: string;

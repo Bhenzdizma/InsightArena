@@ -12,6 +12,10 @@ import { Match } from './match.entity';
 @Index(['on_chain_event_id'], { unique: true })
 @Index(['creator_address'])
 @Index(['is_active'])
+@Index(['is_active', 'is_cancelled', 'created_at'])
+@Index(['creator_address', 'created_at'])
+@Index(['participant_count'])
+@Index(['match_count'])
 export class CreatorEvent {
   @PrimaryGeneratedColumn('uuid')
   id: string;

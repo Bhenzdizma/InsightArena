@@ -15,6 +15,8 @@ import { Market } from '../../markets/entities/market.entity';
 @Unique('UQ_prediction_user_market', ['user', 'market'])
 @Index(['user'])
 @Index(['market'])
+@Index(['submitted_at'])
+@Index(['payout_claimed', 'submitted_at'])
 export class Prediction {
   @PrimaryGeneratedColumn('uuid')
   id: string;
