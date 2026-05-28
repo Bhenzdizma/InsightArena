@@ -204,3 +204,274 @@ fn test_large_creation_fee_accepted() {
 
     assert_eq!(client.get_creation_fee(), fee);
 }
+
+// ===========================================================================
+// #787 — set_treasury
+// ===========================================================================
+
+#[test]
+fn test_set_treasury_admin_can_update() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    let new_treasury = Address::generate(&env);
+    client.set_treasury(&admin, &new_treasury);
+
+    assert_eq!(client.get_treasury(), new_treasury);
+}
+
+#[test]
+fn test_set_treasury_updates_storage_correctly() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    assert_eq!(client.get_treasury(), treasury);
+
+    let new_treasury = Address::generate(&env);
+    client.set_treasury(&admin, &new_treasury);
+    assert_eq!(client.get_treasury(), new_treasury);
+
+    // A second update also works
+    let newest_treasury = Address::generate(&env);
+    client.set_treasury(&admin, &newest_treasury);
+    assert_eq!(client.get_treasury(), newest_treasury);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_set_treasury_non_admin_is_rejected() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    let non_admin = Address::generate(&env);
+    let new_treasury = Address::generate(&env);
+    client.set_treasury(&non_admin, &new_treasury);
+}
+
+#[test]
+#[should_panic(expected = "invalid_address")]
+fn test_set_treasury_contract_self_is_rejected() {
+    let (env, client, contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.set_treasury(&admin, &contract_id);
+}
+
+// ===========================================================================
+// #788 — set_ai_agent
+// ===========================================================================
+
+#[test]
+fn test_set_ai_agent_admin_can_update() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    let new_agent = Address::generate(&env);
+    client.set_ai_agent(&admin, &new_agent);
+
+    assert_eq!(client.get_ai_agent(), new_agent);
+}
+
+#[test]
+fn test_set_ai_agent_updates_storage_correctly() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    assert_eq!(client.get_ai_agent(), ai_agent);
+
+    let new_agent = Address::generate(&env);
+    client.set_ai_agent(&admin, &new_agent);
+    assert_eq!(client.get_ai_agent(), new_agent);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_set_ai_agent_non_admin_is_rejected() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    let non_admin = Address::generate(&env);
+    let new_agent = Address::generate(&env);
+    client.set_ai_agent(&non_admin, &new_agent);
+}
+
+#[test]
+#[should_panic(expected = "invalid_address")]
+fn test_set_ai_agent_contract_self_is_rejected() {
+    let (env, client, contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.set_ai_agent(&admin, &contract_id);
+}
+
+// ===========================================================================
+// #789 — pause / unpause
+// ===========================================================================
+
+#[test]
+fn test_admin_can_pause() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    assert!(!client.is_paused());
+
+    client.pause(&admin);
+    assert!(client.is_paused());
+}
+
+#[test]
+fn test_admin_can_unpause() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.pause(&admin);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn test_pause_unpause_cycle_repeatable() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    client.pause(&admin);
+    assert!(client.is_paused());
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+    client.pause(&admin);
+    assert!(client.is_paused());
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_non_admin_cannot_pause() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    let non_admin = Address::generate(&env);
+    client.pause(&non_admin);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_non_admin_cannot_unpause() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.pause(&admin);
+
+    let non_admin = Address::generate(&env);
+    client.unpause(&non_admin);
+}
+
+#[test]
+#[should_panic(expected = "already_paused")]
+fn test_cannot_pause_when_already_paused() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.pause(&admin);
+    client.pause(&admin); // must panic
+}
+
+#[test]
+#[should_panic(expected = "not_paused")]
+fn test_cannot_unpause_when_not_paused() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.unpause(&admin); // must panic — contract is not paused
+}
+
+#[test]
+#[should_panic(expected = "contract_paused")]
+fn test_ensure_not_paused_blocks_when_paused() {
+    let (env, client, contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+    client.pause(&admin);
+
+    // Storage is only accessible inside the contract context
+    env.as_contract(&contract_id, || {
+        creator_event_manager::admin::ensure_not_paused(&env);
+    });
+}
+
+#[test]
+fn test_ensure_not_paused_passes_when_active() {
+    let (env, client, contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    // Should not panic — contract is active
+    env.as_contract(&contract_id, || {
+        creator_event_manager::admin::ensure_not_paused(&env);
+    });
+}
+
+// ===========================================================================
+// get_treasury / get_ai_agent read helpers
+// ===========================================================================
+
+#[test]
+fn test_get_treasury_returns_initial_treasury() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    assert_eq!(client.get_treasury(), treasury);
+}
+
+#[test]
+fn test_get_ai_agent_returns_initial_agent() {
+    let (env, client, _contract_id) = setup();
+    let (admin, ai_agent, treasury, xlm_token) = make_addresses(&env);
+
+    client.initialize(&admin, &ai_agent, &treasury, &xlm_token, &1_000_000i128);
+
+    assert_eq!(client.get_ai_agent(), ai_agent);
+}

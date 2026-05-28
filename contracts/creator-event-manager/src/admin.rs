@@ -24,6 +24,12 @@ pub enum AdminError {
     InvalidAddress = 2,
     /// `creation_fee` must be strictly positive.
     InvalidCreationFee = 3,
+    /// Caller is not the contract admin.
+    Unauthorized = 4,
+    /// `pause` was called but the contract is already paused.
+    AlreadyPaused = 5,
+    /// `unpause` was called but the contract is not paused.
+    NotPaused = 6,
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +61,9 @@ pub enum AdminError {
 /// | `DataKey::Initialized` | `true` |
 /// | `DataKey::Admin(admin)` | `admin` |
 /// | `DataKey::AIAgent(ai_agent)` | `ai_agent` |
+/// | `DataKey::CurrentAIAgent` | `ai_agent` |
 /// | `DataKey::Treasury(treasury)` | `treasury` |
+/// | `DataKey::CurrentTreasury` | `treasury` |
 /// | `DataKey::XLMToken(xlm_token)` | `xlm_token` |
 /// | `DataKey::CreationFee(0)` | `initial_creation_fee` |
 /// | `DataKey::Paused(false)` | `false` |
@@ -109,21 +117,25 @@ pub fn initialize(
     storage.set(&DataKey::Admin(admin.clone()), &admin);
     storage.extend_ttl(&DataKey::Admin(admin.clone()), TTL_LEDGERS, TTL_LEDGERS);
 
-    // AI agent address
+    // AI agent address — address-keyed entry + canonical retrieval key
     storage.set(&DataKey::AIAgent(ai_agent.clone()), &ai_agent);
     storage.extend_ttl(
         &DataKey::AIAgent(ai_agent.clone()),
         TTL_LEDGERS,
         TTL_LEDGERS,
     );
+    storage.set(&DataKey::CurrentAIAgent, &ai_agent);
+    storage.extend_ttl(&DataKey::CurrentAIAgent, TTL_LEDGERS, TTL_LEDGERS);
 
-    // Treasury address
+    // Treasury address — address-keyed entry + canonical retrieval key
     storage.set(&DataKey::Treasury(treasury.clone()), &treasury);
     storage.extend_ttl(
         &DataKey::Treasury(treasury.clone()),
         TTL_LEDGERS,
         TTL_LEDGERS,
     );
+    storage.set(&DataKey::CurrentTreasury, &treasury);
+    storage.extend_ttl(&DataKey::CurrentTreasury, TTL_LEDGERS, TTL_LEDGERS);
 
     // XLM token address
     storage.set(&DataKey::XLMToken(xlm_token.clone()), &xlm_token);
@@ -158,6 +170,195 @@ pub fn initialize(
 }
 
 // ---------------------------------------------------------------------------
+// Set treasury (#787)
+// ---------------------------------------------------------------------------
+
+/// Update the treasury address where collected fees are sent.
+///
+/// # Roles
+/// **Treasury** is the destination for all creation fees. Only the admin may
+/// change it, and the new address must not be the contract itself.
+///
+/// # Errors
+/// * [`AdminError::Unauthorized`] — caller is not the admin.
+/// * [`AdminError::InvalidAddress`] — `new_treasury` equals the contract address.
+///
+/// # Events
+/// Emits `(Symbol("admin"), Symbol("treasury_updated"))` with data
+/// `(old_treasury, new_treasury)`.
+pub fn set_treasury(
+    env: &Env,
+    caller: Address,
+    new_treasury: Address,
+) -> Result<(), AdminError> {
+    require_is_admin(env, &caller)?;
+
+    if new_treasury == env.current_contract_address() {
+        return Err(AdminError::InvalidAddress);
+    }
+
+    let storage = env.storage().persistent();
+
+    let old_treasury: Address = storage
+        .get::<DataKey, Address>(&DataKey::CurrentTreasury)
+        .unwrap_or_else(|| panic!("not_initialized"));
+
+    // Remove old address-keyed entry and write new one
+    storage.remove(&DataKey::Treasury(old_treasury.clone()));
+    storage.set(&DataKey::Treasury(new_treasury.clone()), &new_treasury);
+    storage.extend_ttl(
+        &DataKey::Treasury(new_treasury.clone()),
+        TTL_LEDGERS,
+        TTL_LEDGERS,
+    );
+
+    // Update canonical retrieval key
+    storage.set(&DataKey::CurrentTreasury, &new_treasury);
+    storage.extend_ttl(&DataKey::CurrentTreasury, TTL_LEDGERS, TTL_LEDGERS);
+
+    env.events().publish(
+        (
+            Symbol::new(env, "admin"),
+            Symbol::new(env, "treasury_updated"),
+        ),
+        (old_treasury, new_treasury),
+    );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Set AI agent (#788)
+// ---------------------------------------------------------------------------
+
+/// Update the AI oracle agent address authorised to submit match results.
+///
+/// # Roles
+/// **AI Agent** is the oracle that posts match outcomes on-chain. Only the
+/// admin may change it, and the new address must not be the contract itself.
+///
+/// # Errors
+/// * [`AdminError::Unauthorized`] — caller is not the admin.
+/// * [`AdminError::InvalidAddress`] — `new_agent` equals the contract address.
+///
+/// # Events
+/// Emits `(Symbol("admin"), Symbol("ai_agent_updated"))` with data
+/// `(old_agent, new_agent)`.
+pub fn set_ai_agent(
+    env: &Env,
+    caller: Address,
+    new_agent: Address,
+) -> Result<(), AdminError> {
+    require_is_admin(env, &caller)?;
+
+    if new_agent == env.current_contract_address() {
+        return Err(AdminError::InvalidAddress);
+    }
+
+    let storage = env.storage().persistent();
+
+    let old_agent: Address = storage
+        .get::<DataKey, Address>(&DataKey::CurrentAIAgent)
+        .unwrap_or_else(|| panic!("not_initialized"));
+
+    // Remove old address-keyed entry and write new one
+    storage.remove(&DataKey::AIAgent(old_agent.clone()));
+    storage.set(&DataKey::AIAgent(new_agent.clone()), &new_agent);
+    storage.extend_ttl(
+        &DataKey::AIAgent(new_agent.clone()),
+        TTL_LEDGERS,
+        TTL_LEDGERS,
+    );
+
+    // Update canonical retrieval key
+    storage.set(&DataKey::CurrentAIAgent, &new_agent);
+    storage.extend_ttl(&DataKey::CurrentAIAgent, TTL_LEDGERS, TTL_LEDGERS);
+
+    env.events().publish(
+        (
+            Symbol::new(env, "admin"),
+            Symbol::new(env, "ai_agent_updated"),
+        ),
+        (old_agent, new_agent),
+    );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Pause / Unpause (#789)
+// ---------------------------------------------------------------------------
+
+/// Halt contract operations in an emergency.
+///
+/// When the contract is paused, `ensure_not_paused` will panic, blocking any
+/// function that calls it. Only the admin may pause.
+///
+/// # Errors
+/// * [`AdminError::Unauthorized`] — caller is not the admin.
+/// * [`AdminError::AlreadyPaused`] — contract is already paused.
+///
+/// # Events
+/// Emits `(Symbol("admin"), Symbol("paused"))` with data `caller`.
+pub fn pause(env: &Env, caller: Address) -> Result<(), AdminError> {
+    require_is_admin(env, &caller)?;
+
+    if is_paused(env) {
+        return Err(AdminError::AlreadyPaused);
+    }
+
+    let storage = env.storage().persistent();
+    storage.set(&DataKey::Paused(false), &true);
+    storage.extend_ttl(&DataKey::Paused(false), TTL_LEDGERS, TTL_LEDGERS);
+
+    env.events().publish(
+        (Symbol::new(env, "admin"), Symbol::new(env, "paused")),
+        caller,
+    );
+
+    Ok(())
+}
+
+/// Resume contract operations after a pause.
+///
+/// Only the admin may unpause.
+///
+/// # Errors
+/// * [`AdminError::Unauthorized`] — caller is not the admin.
+/// * [`AdminError::NotPaused`] — contract is not currently paused.
+///
+/// # Events
+/// Emits `(Symbol("admin"), Symbol("unpaused"))` with data `caller`.
+pub fn unpause(env: &Env, caller: Address) -> Result<(), AdminError> {
+    require_is_admin(env, &caller)?;
+
+    if !is_paused(env) {
+        return Err(AdminError::NotPaused);
+    }
+
+    let storage = env.storage().persistent();
+    storage.set(&DataKey::Paused(false), &false);
+    storage.extend_ttl(&DataKey::Paused(false), TTL_LEDGERS, TTL_LEDGERS);
+
+    env.events().publish(
+        (Symbol::new(env, "admin"), Symbol::new(env, "unpaused")),
+        caller,
+    );
+
+    Ok(())
+}
+
+/// Guard: panic with `"contract_paused"` if the contract is currently paused.
+///
+/// Call this at the start of any function that must be blocked during an
+/// emergency pause (e.g. create_event, place_prediction).
+pub fn ensure_not_paused(env: &Env) {
+    if is_paused(env) {
+        panic!("contract_paused");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Read helpers (used by other modules)
 // ---------------------------------------------------------------------------
 
@@ -184,4 +385,40 @@ pub fn is_paused(env: &Env) -> bool {
         .persistent()
         .get::<DataKey, bool>(&DataKey::Paused(false))
         .unwrap_or(false)
+}
+
+/// Returns the current treasury address, or `None` if not yet initialised.
+pub fn get_treasury(env: &Env) -> Option<Address> {
+    env.storage()
+        .persistent()
+        .get::<DataKey, Address>(&DataKey::CurrentTreasury)
+}
+
+/// Returns the current AI agent address, or `None` if not yet initialised.
+pub fn get_ai_agent(env: &Env) -> Option<Address> {
+    env.storage()
+        .persistent()
+        .get::<DataKey, Address>(&DataKey::CurrentAIAgent)
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/// Verify that `caller` is the stored admin and has authorised the call.
+///
+/// Calls `caller.require_auth()` (Soroban signature check) then looks up
+/// `DataKey::Admin(caller)` in persistent storage. Returns
+/// [`AdminError::Unauthorized`] if the address is not found.
+fn require_is_admin(env: &Env, caller: &Address) -> Result<(), AdminError> {
+    caller.require_auth();
+    let is_admin = env
+        .storage()
+        .persistent()
+        .get::<DataKey, Address>(&DataKey::Admin(caller.clone()))
+        .is_some();
+    if !is_admin {
+        return Err(AdminError::Unauthorized);
+    }
+    Ok(())
 }

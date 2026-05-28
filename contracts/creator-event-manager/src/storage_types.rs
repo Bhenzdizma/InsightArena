@@ -136,6 +136,17 @@ pub enum DataKey {
     // ── Initialization sentinel ──────────────────────────────────────────────
     /// Set to `true` once `initialize` has been called; prevents re-init.
     Initialized,
+
+    // ── Canonical address lookups (no-payload keys for retrieval) ────────────
+    /// Current treasury address — updated by set_treasury; used for fee routing.
+    CurrentTreasury,
+
+    /// Current AI agent address — updated by set_ai_agent; used for oracle auth.
+    CurrentAIAgent,
+
+    // ── Verification keys (#790–#793) ────────────────────────────────────────
+    /// Verification status for an address — true = verified, false = not verified.
+    VerifiedAddresses(Address),
 }
 
 // ---------------------------------------------------------------------------
