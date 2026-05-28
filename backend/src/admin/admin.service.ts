@@ -133,33 +133,52 @@ export class AdminService {
     startOfWeek.setDate(now.getDate() - now.getDay());
     startOfWeek.setHours(0, 0, 0, 0);
 
-    const totalEvents = await this.creatorEventRepository.count();
+    const eventQb = this.creatorEventRepository
+      .createQueryBuilder('event');
+    const countQb = this.creatorEventRepository
+      .createQueryBuilder('event');
 
-    const totalFeeResult = await this.creatorEventRepository
-      .createQueryBuilder('event')
+    if (query.start_date) {
+      eventQb.andWhere('event.on_chain_created_at >= :startDate', {
+        startDate: new Date(query.start_date),
+      });
+      countQb.andWhere('event.on_chain_created_at >= :startDate', {
+        startDate: new Date(query.start_date),
+      });
+    }
+    if (query.end_date) {
+      eventQb.andWhere('event.on_chain_created_at <= :endDate', {
+        endDate: new Date(query.end_date),
+      });
+      countQb.andWhere('event.on_chain_created_at <= :endDate', {
+        endDate: new Date(query.end_date),
+      });
+    }
+
+    const totalEvents = await countQb.getCount();
+
+    const totalFeeResult = (await eventQb
       .select('SUM(CAST(event.creation_fee_paid AS DECIMAL))', 'total')
-      .getRawOne() as { total: string | null };
+      .getRawOne()) as { total: string | null };
     const totalFees = totalFeeResult?.total || '0';
 
-    const monthFeeResult = await this.creatorEventRepository
+    const monthFeeResult = (await this.creatorEventRepository
       .createQueryBuilder('event')
       .select('SUM(CAST(event.creation_fee_paid AS DECIMAL))', 'total')
       .where('event.on_chain_created_at >= :startOfMonth', { startOfMonth })
-      .getRawOne() as { total: string | null };
+      .getRawOne()) as { total: string | null };
     const monthFees = monthFeeResult?.total || '0';
 
-    const weekFeeResult = await this.creatorEventRepository
+    const weekFeeResult = (await this.creatorEventRepository
       .createQueryBuilder('event')
       .select('SUM(CAST(event.creation_fee_paid AS DECIMAL))', 'total')
       .where('event.on_chain_created_at >= :startOfWeek', { startOfWeek })
-      .getRawOne() as { total: string | null };
+      .getRawOne()) as { total: string | null };
     const weekFees = weekFeeResult?.total || '0';
 
     const avgFee =
       totalEvents > 0
-        ? (
-            BigInt(totalFees.split('.')[0]) / BigInt(totalEvents)
-          ).toString()
+        ? (BigInt(totalFees.split('.')[0]) / BigInt(totalEvents)).toString()
         : '0';
 
     const feeHistory = await this.feeHistoryRepository.find({

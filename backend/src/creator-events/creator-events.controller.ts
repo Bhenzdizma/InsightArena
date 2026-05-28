@@ -7,7 +7,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -41,7 +46,9 @@ export class CreatorEventsController {
   @Get(':id/participants')
   @UseInterceptors(CacheInterceptor)
   @CacheTTL(60) // 1 minute
-  @ApiOperation({ summary: 'Get event participants with scores and pagination' })
+  @ApiOperation({
+    summary: 'Get event participants with scores and pagination',
+  })
   @ApiResponse({ status: 200, description: 'Paginated participant list' })
   getParticipants(
     @Param('id') id: string,

@@ -217,7 +217,10 @@ export class MarketsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cancel a prediction market (creator or admin)' })
   @ApiResponse({ status: 200, description: 'Market cancelled', type: Market })
-  @ApiResponse({ status: 400, description: 'Market has already ended or is resolved' })
+  @ApiResponse({
+    status: 400,
+    description: 'Market has already ended or is resolved',
+  })
   @ApiResponse({ status: 403, description: 'Caller is not creator or admin' })
   @ApiResponse({ status: 404, description: 'Market not found' })
   @ApiResponse({ status: 502, description: 'Soroban contract call failed' })

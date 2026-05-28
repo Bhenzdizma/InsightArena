@@ -94,7 +94,6 @@ import { CreatorEventsModule } from './creator-events/creator-events.module';
     IndexerModule,
     ContractModule,
     CreatorEventsModule,
-
   ],
 
   controllers: [AppController],

@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { IndexerService } from './indexer.service';
-import { ContractEvent, ContractEventStatus } from './entities/contract-event.entity';
+import {
+  ContractEvent,
+  ContractEventStatus,
+} from './entities/contract-event.entity';
 import { FeeHistory } from './entities/fee-history.entity';
 import { IndexerCheckpoint } from './entities/indexer-checkpoint.entity';
 import { CreatorEvent } from '../matches/entities/creator-event.entity';
@@ -14,26 +17,39 @@ import { User } from '../users/entities/user.entity';
 describe('IndexerService', () => {
   let service: IndexerService;
   let contractEventRepository: jest.Mocked<
-    Pick<Repository<ContractEvent>, 'findOne' | 'create' | 'save' | 'count' | 'find' | 'delete' | 'createQueryBuilder'>
+    Pick<
+      Repository<ContractEvent>,
+      | 'findOne'
+      | 'create'
+      | 'save'
+      | 'count'
+      | 'find'
+      | 'delete'
+      | 'createQueryBuilder'
+    >
   >;
   let checkpointRepository: jest.Mocked<
     Pick<Repository<IndexerCheckpoint>, 'findOne' | 'save' | 'upsert'>
   >;
   let creatorEventRepository: jest.Mocked<
-    Pick<Repository<CreatorEvent>, 'findOne' | 'create' | 'save' | 'count' | 'createQueryBuilder'>
+    Pick<
+      Repository<CreatorEvent>,
+      'findOne' | 'create' | 'save' | 'count' | 'createQueryBuilder'
+    >
   >;
   let matchRepository: jest.Mocked<
     Pick<Repository<Match>, 'findOne' | 'create' | 'save'>
   >;
   let matchPredictionRepository: jest.Mocked<
-    Pick<Repository<MatchPrediction>, 'findOne' | 'create' | 'save' | 'count' | 'find' | 'findAndCount'>
+    Pick<
+      Repository<MatchPrediction>,
+      'findOne' | 'create' | 'save' | 'count' | 'find' | 'findAndCount'
+    >
   >;
   let feeHistoryRepository: jest.Mocked<
     Pick<Repository<FeeHistory>, 'findOne' | 'create' | 'save' | 'find'>
   >;
-  let userRepository: jest.Mocked<
-    Pick<Repository<User>, 'findOne' | 'save'>
-  >;
+  let userRepository: jest.Mocked<Pick<Repository<User>, 'findOne' | 'save'>>;
   let configService: jest.Mocked<Pick<ConfigService, 'get'>>;
 
   beforeEach(async () => {
@@ -96,12 +112,27 @@ describe('IndexerService', () => {
       providers: [
         IndexerService,
         { provide: ConfigService, useValue: configService },
-        { provide: getRepositoryToken(ContractEvent), useValue: contractEventRepository },
-        { provide: getRepositoryToken(FeeHistory), useValue: feeHistoryRepository },
-        { provide: getRepositoryToken(IndexerCheckpoint), useValue: checkpointRepository },
-        { provide: getRepositoryToken(CreatorEvent), useValue: creatorEventRepository },
+        {
+          provide: getRepositoryToken(ContractEvent),
+          useValue: contractEventRepository,
+        },
+        {
+          provide: getRepositoryToken(FeeHistory),
+          useValue: feeHistoryRepository,
+        },
+        {
+          provide: getRepositoryToken(IndexerCheckpoint),
+          useValue: checkpointRepository,
+        },
+        {
+          provide: getRepositoryToken(CreatorEvent),
+          useValue: creatorEventRepository,
+        },
         { provide: getRepositoryToken(Match), useValue: matchRepository },
-        { provide: getRepositoryToken(MatchPrediction), useValue: matchPredictionRepository },
+        {
+          provide: getRepositoryToken(MatchPrediction),
+          useValue: matchPredictionRepository,
+        },
         { provide: getRepositoryToken(User), useValue: userRepository },
       ],
     }).compile();
@@ -116,7 +147,10 @@ describe('IndexerService', () => {
       await service.reindex(100);
 
       expect(checkpointRepository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ key: 'indexer:last_processed_ledger', value: 99 }),
+        expect.objectContaining({
+          key: 'indexer:last_processed_ledger',
+          value: 99,
+        }),
         ['key'],
       );
     });
@@ -125,13 +159,19 @@ describe('IndexerService', () => {
   describe('getMetrics', () => {
     it('should return indexer metrics', async () => {
       checkpointRepository.findOne
-        .mockResolvedValueOnce({ key: 'indexer:last_processed_ledger', value: 500 } as IndexerCheckpoint)
-        .mockResolvedValueOnce({ key: 'indexer:latest_contract_ledger', value: 1000 } as IndexerCheckpoint);
+        .mockResolvedValueOnce({
+          key: 'indexer:last_processed_ledger',
+          value: 500,
+        } as IndexerCheckpoint)
+        .mockResolvedValueOnce({
+          key: 'indexer:latest_contract_ledger',
+          value: 1000,
+        } as IndexerCheckpoint);
 
       contractEventRepository.count
-        .mockResolvedValueOnce(10)  // pending
-        .mockResolvedValueOnce(2)   // failed
-        .mockResolvedValueOnce(1)   // dlq
+        .mockResolvedValueOnce(10) // pending
+        .mockResolvedValueOnce(2) // failed
+        .mockResolvedValueOnce(1) // dlq
         .mockResolvedValueOnce(950); // processed
 
       const metrics = await service.getMetrics();
@@ -152,7 +192,14 @@ describe('IndexerService', () => {
       const failedEvent = {
         id: 'event-1',
         event_type: 'EventCreated',
-        data: { event_id: '1', creator: 'GABC', title: 'Test', description: 'Desc', creation_fee_paid: '1000', created_at: Date.now() / 1000 },
+        data: {
+          event_id: '1',
+          creator: 'GABC',
+          title: 'Test',
+          description: 'Desc',
+          creation_fee_paid: '1000',
+          created_at: Date.now() / 1000,
+        },
         retry_count: 1,
         status: ContractEventStatus.FAILED,
       } as ContractEvent;
@@ -181,11 +228,19 @@ describe('IndexerService', () => {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([
-          { id: 'e1', ledger: 100, log_index: 1, event_type: 'EventCreated', status: ContractEventStatus.PROCESSED } as ContractEvent,
+          {
+            id: 'e1',
+            ledger: 100,
+            log_index: 1,
+            event_type: 'EventCreated',
+            status: ContractEventStatus.PROCESSED,
+          } as ContractEvent,
         ]),
       };
 
-      contractEventRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      contractEventRepository.createQueryBuilder.mockReturnValue(
+        mockQueryBuilder as any,
+      );
 
       const result = await service.getEventsPaginated(undefined, 10);
 
@@ -213,7 +268,9 @@ describe('IndexerService', () => {
       })) as ContractEvent[];
 
       mockQueryBuilder.getMany.mockResolvedValue(events);
-      contractEventRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      contractEventRepository.createQueryBuilder.mockReturnValue(
+        mockQueryBuilder as any,
+      );
 
       const result = await service.getEventsPaginated(undefined, 5);
 
@@ -221,7 +278,10 @@ describe('IndexerService', () => {
       expect(result.meta.has_more).toBe(true);
       expect(result.meta.next_cursor).toBeTruthy();
 
-      const decoded = Buffer.from(result.meta.next_cursor!, 'base64').toString();
+      const decoded = Buffer.from(
+        result.meta.next_cursor!,
+        'base64',
+      ).toString();
       expect(decoded).toContain(':');
     });
   });

@@ -7,9 +7,7 @@ import { MatchPrediction } from './entities/match-prediction.entity';
 import { CreatorEvent } from './entities/creator-event.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Match, MatchPrediction, CreatorEvent]),
-  ],
+  imports: [TypeOrmModule.forFeature([Match, MatchPrediction, CreatorEvent])],
   controllers: [MatchesController],
   providers: [MatchesService],
   exports: [MatchesService, TypeOrmModule],

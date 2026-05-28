@@ -1,6 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ContractService, ContractEvent, ContractConfig, ContractParticipant } from '../contract/contract.service';
-import { ListParticipantsQueryDto, ParticipantSortBy, SortOrder } from './dto/list-participants-query.dto';
+import {
+  ContractService,
+  ContractEvent,
+  ContractConfig,
+  ContractParticipant,
+} from '../contract/contract.service';
+import {
+  ListParticipantsQueryDto,
+  ParticipantSortBy,
+  SortOrder,
+} from './dto/list-participants-query.dto';
 
 export interface EnrichedEvent extends ContractEvent {
   matchCount: number;
@@ -62,12 +71,15 @@ export class CreatorEventsService {
     eventId: string,
     query: ListParticipantsQueryDto,
   ): Promise<PaginatedParticipants> {
-    const raw: ContractParticipant[] = await this.contractService.getEventParticipants(eventId);
+    const raw: ContractParticipant[] =
+      await this.contractService.getEventParticipants(eventId);
 
     const withStats: ParticipantWithStats[] = raw.map((p, i) => {
       const correct =
-        typeof (p as ContractParticipant & { correctPredictions?: number }).correctPredictions === 'number'
-          ? (p as ContractParticipant & { correctPredictions: number }).correctPredictions
+        typeof (p as ContractParticipant & { correctPredictions?: number })
+          .correctPredictions === 'number'
+          ? (p as ContractParticipant & { correctPredictions: number })
+              .correctPredictions
           : 0;
       const accuracy =
         p.predictionCount > 0
@@ -83,8 +95,14 @@ export class CreatorEventsService {
       };
     });
 
-    const sorted = this.sortParticipants(withStats, query.sortBy, query.sortOrder);
-    sorted.forEach((p, i) => { p.rank = i + 1; });
+    const sorted = this.sortParticipants(
+      withStats,
+      query.sortBy,
+      query.sortOrder,
+    );
+    sorted.forEach((p, i) => {
+      p.rank = i + 1;
+    });
 
     const total = sorted.length;
     const start = (query.page - 1) * query.limit;
@@ -103,7 +121,9 @@ export class CreatorEventsService {
     const config = await this.contractService.getConfig();
 
     if (!config) {
-      this.logger.warn('getContractConfig: contract returned null, returning defaults');
+      this.logger.warn(
+        'getContractConfig: contract returned null, returning defaults',
+      );
       return {
         admin: '',
         aiAgent: '',

@@ -122,9 +122,9 @@ describe('MatchesService', () => {
     it('should throw NotFoundException when match does not exist', async () => {
       matchRepository.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.getMatchDetail('non-existent'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.getMatchDetail('non-existent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -177,12 +177,7 @@ describe('MatchesService', () => {
         2,
       ]);
 
-      const result = await service.getMatchPredictions(
-        'match-1',
-        true,
-        1,
-        20,
-      );
+      const result = await service.getMatchPredictions('match-1', true, 1, 20);
 
       expect(result.users).toHaveLength(2);
       expect(result.users![0].user_address).toBe('GUSER1');
@@ -203,12 +198,7 @@ describe('MatchesService', () => {
 
       matchPredictionRepository.findAndCount.mockResolvedValue([[], 50]);
 
-      const result = await service.getMatchPredictions(
-        'match-1',
-        true,
-        2,
-        10,
-      );
+      const result = await service.getMatchPredictions('match-1', true, 2, 10);
 
       expect(result.meta!.page).toBe(2);
       expect(result.meta!.limit).toBe(10);
@@ -219,9 +209,9 @@ describe('MatchesService', () => {
     it('should throw NotFoundException when match does not exist', async () => {
       matchRepository.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.getMatchPredictions('non-existent'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.getMatchPredictions('non-existent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

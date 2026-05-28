@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -108,15 +104,11 @@ export class IndexerService implements OnModuleInit {
       const lastLedger = await this.getLastProcessedLedger();
       const fromLedger = Math.max(lastLedger + 1, 1);
 
-      const { events, latestLedger } = await this.fetchEventsFromContract(
-        fromLedger,
-      );
+      const { events, latestLedger } =
+        await this.fetchEventsFromContract(fromLedger);
 
       if (latestLedger > lastLedger) {
-        await this.saveCheckpoint(
-          CHECKPOINT_LEDGER_KEY_LATEST,
-          latestLedger,
-        );
+        await this.saveCheckpoint(CHECKPOINT_LEDGER_KEY_LATEST, latestLedger);
       }
 
       if (events.length === 0) {
@@ -163,9 +155,7 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
-  private async fetchEventsFromContract(
-    fromLedger: number,
-  ): Promise<{
+  private async fetchEventsFromContract(fromLedger: number): Promise<{
     events: Array<{
       id: string;
       ledger: number;
@@ -193,9 +183,7 @@ export class IndexerService implements OnModuleInit {
           method: 'getEvents',
           params: {
             startLedger: fromLedger,
-            filters: [
-              { type: 'contract', contractIds: [contractId] },
-            ],
+            filters: [{ type: 'contract', contractIds: [contractId] }],
             limit: BATCH_SIZE,
           },
         }),
@@ -224,9 +212,7 @@ export class IndexerService implements OnModuleInit {
           : fromLedger;
 
       const parsed = rawEvents
-        .map((raw: unknown, index: number) =>
-          this.parseRawEvent(raw, index),
-        )
+        .map((raw: unknown, index: number) => this.parseRawEvent(raw, index))
         .filter((e) => e !== null);
 
       return { events: parsed, latestLedger };
@@ -262,7 +248,7 @@ export class IndexerService implements OnModuleInit {
     const value =
       record.value && typeof record.value === 'object'
         ? (record.value as Record<string, unknown>)
-        : (record.data as Record<string, unknown>) ?? {};
+        : ((record.data as Record<string, unknown>) ?? {});
 
     const eventType = this.detectEventType(topic, value);
     if (!eventType) return null;
@@ -322,7 +308,10 @@ export class IndexerService implements OnModuleInit {
     if (topicStr.includes('matchadded')) return 'MatchAdded';
     if (topicStr.includes('userjoined')) return 'UserJoinedEvent';
     if (topicStr.includes('predictionsubmitted')) return 'PredictionSubmitted';
-    if (topicStr.includes('matchresultsubmitted') || topicStr.includes('reslvd'))
+    if (
+      topicStr.includes('matchresultsubmitted') ||
+      topicStr.includes('reslvd')
+    )
       return 'MatchResultSubmitted';
     if (topicStr.includes('winnersverified')) return 'WinnersVerified';
     if (topicStr.includes('eventcancelled')) return 'EventCancelled';
@@ -331,7 +320,10 @@ export class IndexerService implements OnModuleInit {
     if (topicStr.includes('addressunverified')) return 'AddressUnverified';
     if (topicStr.includes('payclmd') || topicStr.includes('payoutclaimed'))
       return 'PayoutClaimed';
-    if (topicStr.includes('submitd') || topicStr.includes('predictionsubmitted'))
+    if (
+      topicStr.includes('submitd') ||
+      topicStr.includes('predictionsubmitted')
+    )
       return 'PredictionSubmitted';
 
     return null;
@@ -569,9 +561,7 @@ export class IndexerService implements OnModuleInit {
       where: { on_chain_event_id: onChainEventId },
     });
     if (!event) {
-      this.logger.warn(
-        `MatchAdded skipped: event ${onChainEventId} not found`,
-      );
+      this.logger.warn(`MatchAdded skipped: event ${onChainEventId} not found`);
       return;
     }
 
@@ -757,9 +747,7 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
-  private handleWinnersVerified(
-    data: Record<string, unknown>,
-  ): void {
+  private handleWinnersVerified(data: Record<string, unknown>): void {
     this.logger.log(
       `WinnersVerified event received for event_id=${String(data.event_id)}`,
     );
@@ -790,9 +778,7 @@ export class IndexerService implements OnModuleInit {
     this.logger.log(`Indexed EventCancelled: event_id=${onChainEventId}`);
   }
 
-  private async handleFeeUpdated(
-    data: Record<string, unknown>,
-  ): Promise<void> {
+  private async handleFeeUpdated(data: Record<string, unknown>): Promise<void> {
     const oldFee = this.readStr(data, 'old_fee') || '0';
     const newFee = this.readStr(data, 'new_fee') || '0';
     const updatedBy = this.readStr(data, 'updated_by');
@@ -806,9 +792,7 @@ export class IndexerService implements OnModuleInit {
     });
 
     await this.feeHistoryRepository.save(feeHistory);
-    this.logger.log(
-      `Indexed FeeUpdated: old=${oldFee} new=${newFee}`,
-    );
+    this.logger.log(`Indexed FeeUpdated: old=${oldFee} new=${newFee}`);
   }
 
   private async handleAddressVerified(
@@ -845,7 +829,10 @@ export class IndexerService implements OnModuleInit {
 
   async reindex(fromLedger: number): Promise<void> {
     this.logger.log(`Reindex triggered from ledger ${fromLedger}`);
-    await this.saveCheckpoint(CHECKPOINT_LEDGER_KEY, Math.max(0, fromLedger - 1));
+    await this.saveCheckpoint(
+      CHECKPOINT_LEDGER_KEY,
+      Math.max(0, fromLedger - 1),
+    );
   }
 
   async getEventsPaginated(cursor?: string, limit = 50) {
@@ -873,9 +860,9 @@ export class IndexerService implements OnModuleInit {
     let nextCursor: string | null = null;
     if (hasMore && events.length > 0) {
       const last = events[events.length - 1];
-      nextCursor = Buffer.from(
-        `${last.ledger}:${last.log_index}`,
-      ).toString('base64');
+      nextCursor = Buffer.from(`${last.ledger}:${last.log_index}`).toString(
+        'base64',
+      );
     }
 
     return {
@@ -971,14 +958,8 @@ export class IndexerService implements OnModuleInit {
     return cp ? cp.value : 0;
   }
 
-  private async saveCheckpoint(
-    key: string,
-    value: number,
-  ): Promise<void> {
-    await this.checkpointRepository.upsert(
-      { key, value, meta: null },
-      ['key'],
-    );
+  private async saveCheckpoint(key: string, value: number): Promise<void> {
+    await this.checkpointRepository.upsert({ key, value, meta: null }, ['key']);
   }
 
   private readStr(data: Record<string, unknown>, key: string): string {
@@ -986,13 +967,10 @@ export class IndexerService implements OnModuleInit {
     if (typeof val === 'string') return val;
     if (typeof val === 'number' || typeof val === 'boolean') return String(val);
     if (val === null || val === undefined) return '';
-    return String(val);
+    return JSON.stringify(val);
   }
 
-  private readNum(
-    data: Record<string, unknown>,
-    key: string,
-  ): number | null {
+  private readNum(data: Record<string, unknown>, key: string): number | null {
     const val = data[key];
     if (typeof val === 'number' && Number.isFinite(val)) return val;
     if (typeof val === 'string') {
@@ -1002,10 +980,7 @@ export class IndexerService implements OnModuleInit {
     return null;
   }
 
-  private readBigInt(
-    data: Record<string, unknown>,
-    key: string,
-  ): string {
+  private readBigInt(data: Record<string, unknown>, key: string): string {
     const val = data[key];
     if (val == null) return '0';
     if (typeof val === 'string') {

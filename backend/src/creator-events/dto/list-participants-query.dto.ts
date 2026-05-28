@@ -29,7 +29,10 @@ export class ListParticipantsQueryDto {
   @Max(100)
   limit: number = 20;
 
-  @ApiPropertyOptional({ enum: ParticipantSortBy, default: ParticipantSortBy.JoinedAt })
+  @ApiPropertyOptional({
+    enum: ParticipantSortBy,
+    default: ParticipantSortBy.JoinedAt,
+  })
   @IsOptional()
   @IsEnum(ParticipantSortBy)
   sortBy: ParticipantSortBy = ParticipantSortBy.JoinedAt;

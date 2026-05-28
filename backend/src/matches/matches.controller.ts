@@ -1,17 +1,6 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseInterceptors,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import {
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import { MatchesService } from './matches.service';
 import { MatchDetailDto } from './dto/match-detail.dto';

@@ -75,8 +75,10 @@ export class ContractService {
   private readonly networkPassphrase: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.contractId = this.configService.get<string>('SOROBAN_CONTRACT_ID') ?? '';
-    this.network = this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
+    this.contractId =
+      this.configService.get<string>('SOROBAN_CONTRACT_ID') ?? '';
+    this.network =
+      this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
     this.rpcUrl =
       this.configService.get<string>('SOROBAN_RPC_URL') ??
       'https://soroban-testnet.stellar.org';
@@ -94,15 +96,21 @@ export class ContractService {
   }
 
   async getEvent(eventId: string): Promise<ContractEvent | null> {
-    return this.viewCall('get_event', [nativeToScVal(eventId, { type: 'string' })]);
+    return this.viewCall('get_event', [
+      nativeToScVal(eventId, { type: 'string' }),
+    ]);
   }
 
   async getEventByCode(inviteCode: string): Promise<ContractEvent | null> {
-    return this.viewCall('get_event_by_code', [nativeToScVal(inviteCode, { type: 'string' })]);
+    return this.viewCall('get_event_by_code', [
+      nativeToScVal(inviteCode, { type: 'string' }),
+    ]);
   }
 
   async getMatch(matchId: string): Promise<ContractMatch | null> {
-    return this.viewCall('get_match', [nativeToScVal(matchId, { type: 'string' })]);
+    return this.viewCall('get_match', [
+      nativeToScVal(matchId, { type: 'string' }),
+    ]);
   }
 
   async getEventMatches(eventId: string): Promise<ContractMatch[]> {
@@ -112,22 +120,30 @@ export class ContractService {
     return result ?? [];
   }
 
-  async getPrediction(predictionId: string): Promise<ContractPrediction | null> {
-    return this.viewCall('get_prediction', [nativeToScVal(predictionId, { type: 'string' })]);
+  async getPrediction(
+    predictionId: string,
+  ): Promise<ContractPrediction | null> {
+    return this.viewCall('get_prediction', [
+      nativeToScVal(predictionId, { type: 'string' }),
+    ]);
   }
 
-  async getUserPredictions(user: string, eventId: string): Promise<ContractPrediction[]> {
-    const result = await this.viewCall<ContractPrediction[]>('get_user_predictions', [
-      new Address(user).toScVal(),
-      nativeToScVal(eventId, { type: 'string' }),
-    ]);
+  async getUserPredictions(
+    user: string,
+    eventId: string,
+  ): Promise<ContractPrediction[]> {
+    const result = await this.viewCall<ContractPrediction[]>(
+      'get_user_predictions',
+      [new Address(user).toScVal(), nativeToScVal(eventId, { type: 'string' })],
+    );
     return result ?? [];
   }
 
   async getEventParticipants(eventId: string): Promise<ContractParticipant[]> {
-    const result = await this.viewCall<ContractParticipant[]>('get_event_participants', [
-      nativeToScVal(eventId, { type: 'string' }),
-    ]);
+    const result = await this.viewCall<ContractParticipant[]>(
+      'get_event_participants',
+      [nativeToScVal(eventId, { type: 'string' })],
+    );
     return result ?? [];
   }
 
@@ -156,7 +172,9 @@ export class ContractService {
 
   private async viewCall<T>(fn: string, args: xdr.ScVal[]): Promise<T | null> {
     if (!this.contractId) {
-      this.logger.warn(`viewCall(${fn}): contract ID not configured, returning null`);
+      this.logger.warn(
+        `viewCall(${fn}): contract ID not configured, returning null`,
+      );
       return null;
     }
 
@@ -169,15 +187,21 @@ export class ContractService {
 
         // Use a throwaway keypair — view calls don't need a real signer
         const keypair = Keypair.random();
-        const account = await this.rpcServer.getAccount(keypair.publicKey()).catch(() => {
-          // If account doesn't exist on network, create a minimal source account object
-          return new SorobanRpc.Server(this.rpcUrl, { allowHttp: this.rpcUrl.startsWith('http://') })
-            .getAccount(keypair.publicKey())
-            .catch(() => null);
-        });
+        const account = await this.rpcServer
+          .getAccount(keypair.publicKey())
+          .catch(() => {
+            // If account doesn't exist on network, create a minimal source account object
+            return new SorobanRpc.Server(this.rpcUrl, {
+              allowHttp: this.rpcUrl.startsWith('http://'),
+            })
+              .getAccount(keypair.publicKey())
+              .catch(() => null);
+          });
 
         if (!account) {
-          this.logger.warn(`viewCall(${fn}): could not load source account, using stub`);
+          this.logger.warn(
+            `viewCall(${fn}): could not load source account, using stub`,
+          );
           return null;
         }
 
@@ -193,11 +217,14 @@ export class ContractService {
         const simulation = await this.rpcServer.simulateTransaction(tx);
 
         if (SorobanRpc.Api.isSimulationError(simulation)) {
-          this.logger.error(`viewCall(${fn}) simulation error: ${simulation.error}`);
+          this.logger.error(
+            `viewCall(${fn}) simulation error: ${simulation.error}`,
+          );
           return null;
         }
 
-        const successResult = simulation as SorobanRpc.Api.SimulateTransactionSuccessResponse;
+        const successResult =
+          simulation as SorobanRpc.Api.SimulateTransactionSuccessResponse;
         if (!successResult.result?.retval) {
           return null;
         }
@@ -206,7 +233,9 @@ export class ContractService {
       } catch (err) {
         attempt++;
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`viewCall(${fn}) attempt ${attempt} failed: ${message}`);
+        this.logger.warn(
+          `viewCall(${fn}) attempt ${attempt} failed: ${message}`,
+        );
         if (attempt >= maxAttempts) {
           this.logger.error(`viewCall(${fn}) exhausted retries`);
           return null;
