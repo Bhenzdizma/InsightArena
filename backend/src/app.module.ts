@@ -28,6 +28,8 @@ import { SeasonsModule } from './seasons/seasons.module';
 import { SorobanModule } from './soroban/soroban.module';
 import { UsersModule } from './users/users.module';
 import { DisputesModule } from './disputes/disputes.module';
+import { ContractModule } from './contract/contract.module';
+import { CreatorEventsModule } from './creator-events/creator-events.module';
 
 @Module({
   imports: [
@@ -86,6 +88,8 @@ import { DisputesModule } from './disputes/disputes.module';
     CommonModule,
     FlagsModule,
     DisputesModule,
+    ContractModule,
+    CreatorEventsModule,
   ],
 
   controllers: [AppController],
