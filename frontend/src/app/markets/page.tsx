@@ -1,43 +1,201 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import Header from "@/component/Header";
 import Footer from "@/component/Footer";
 import PageBackground from "@/component/PageBackground";
+import MarketCard from "@/component/MarketCard";
+import { useWallet } from "@/context/WalletContext";
+
+type Market = {
+  id: string;
+  title: string;
+  category: string;
+  probability: number; // 0..1
+  totalStaked: number; // in XLM
+  closeAt: string; // ISO date
+  status: "active" | "resolved" | "upcoming";
+};
+
+const PAGE_SIZE = 8;
 
 export default function MarketsPage() {
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
+  const [status, setStatus] = useState("All");
+  const [sort, setSort] = useState("newest");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    async function load() {
+      setLoading(true);
+      try {
+        const base = process.env.NEXT_PUBLIC_API_URL || "";
+        const res = await fetch(`${base}/api/v1/markets`);
+        if (!res.ok) throw new Error("fetch failed");
+        const data = await res.json();
+        if (mounted) setMarkets(data || []);
+      } catch (e) {
+        // fallback mock data
+        if (mounted)
+          setMarkets([
+            {
+              id: "1",
+              title: "Will BTC be above $70k on 2026-12-31?",
+              category: "Crypto",
+              probability: 0.42,
+              totalStaked: 124.5,
+              closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(),
+              status: "active",
+            },
+            {
+              id: "2",
+              title: "Team A to beat Team B in the Finals",
+              category: "Sports",
+              probability: 0.66,
+              totalStaked: 52.1,
+              closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3).toISOString(),
+              status: "active",
+            },
+            {
+              id: "3",
+              title: "Will inflation drop below 3% in 2026?",
+              category: "Economics",
+              probability: 0.28,
+              totalStaked: 18.0,
+              closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 60).toISOString(),
+              status: "upcoming",
+            },
+          ]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const categories = useMemo(() => {
+    const set = new Set(markets.map((m) => m.category));
+    return ["All", ...Array.from(set)];
+  }, [markets]);
+
+  const filtered = useMemo(() => {
+    let list = markets.slice();
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      list = list.filter((m) => m.title.toLowerCase().includes(s));
+    }
+    if (category !== "All") list = list.filter((m) => m.category === category);
+    if (status !== "All") list = list.filter((m) => m.status === status.toLowerCase());
+
+    if (sort === "newest") list.sort((a, b) => +new Date(b.closeAt) - +new Date(a.closeAt));
+    if (sort === "popular") list.sort((a, b) => b.totalStaked - a.totalStaked);
+    if (sort === "closing") list.sort((a, b) => +new Date(a.closeAt) - +new Date(b.closeAt));
+
+    return list;
+  }, [markets, search, category, status, sort]);
+
+  const paged = filtered.slice(0, page * PAGE_SIZE);
+
+  const { isAuthenticated, openConnectModal } = useWallet();
+
+  function handlePredict(market: Market) {
+    if (!isAuthenticated) {
+      openConnectModal();
+      return;
+    }
+    // navigate to market detail / prediction flow
+    window.location.href = `/markets/${market.id}`;
+  }
+
   return (
     <PageBackground>
       <Header />
 
-      <main className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
-        <div className="max-w-lg space-y-6">
-          {/* Pulsing badge */}
-          <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-4 py-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-orange-400" />
-            <span className="text-sm font-semibold uppercase tracking-widest text-orange-400">
-              Coming Soon
-            </span>
+      <main className="min-h-screen px-6 py-12">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-white">Markets</h1>
+              <p className="mt-1 text-sm text-gray-400">Browse live prediction markets and compete.</p>
+            </div>
+
+            <div className="flex w-full max-w-lg items-center gap-2">
+              <input
+                aria-label="Search markets"
+                placeholder="Search markets..."
+                className="w-full rounded-md border border-white/10 bg-white/2 px-3 py-2 text-sm text-white placeholder:text-gray-500"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
           </div>
 
-          <h1 className="text-4xl font-bold text-white sm:text-5xl">Markets</h1>
-
-          <p className="text-base leading-relaxed text-gray-400 sm:text-lg">
-            Browse and predict on live prediction markets — powered by Stellar
-            and Soroban smart contracts. Public markets are launching soon.
-          </p>
-
-          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-            <a
-              href="/events"
-              className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
+          <div className="mb-6 flex w-full flex-wrap items-center gap-3">
+            <select
+              className="rounded-md border border-white/10 bg-white/2 px-3 py-2 text-sm text-white"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
             >
-              Browse Events
-            </a>
-            <a
-              href="/leaderboard"
-              className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+              {categories.map((c) => (
+                <option key={c} value={c} className="text-black">
+                  {c}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="rounded-md border border-white/10 bg-white/2 px-3 py-2 text-sm text-white"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
             >
-              View Leaderboard
-            </a>
+              <option>All</option>
+              <option>Active</option>
+              <option>Resolved</option>
+              <option>Upcoming</option>
+            </select>
+
+            <select
+              className="rounded-md border border-white/10 bg-white/2 px-3 py-2 text-sm text-white"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            >
+              <option value="newest">Newest</option>
+              <option value="popular">Most Popular</option>
+              <option value="closing">Closing Soon</option>
+            </select>
+
+            <div className="ml-auto text-sm text-gray-400">{filtered.length} results</div>
           </div>
+
+          {loading && <div className="py-12 text-center text-gray-400">Loading markets...</div>}
+
+          {!loading && paged.length === 0 && (
+            <div className="rounded-md border border-white/6 bg-white/3 p-8 text-center text-gray-300">No markets found.</div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {paged.map((m) => (
+              <MarketCard key={m.id} market={m} onPredict={() => handlePredict(m)} />
+            ))}
+          </div>
+
+          {paged.length < filtered.length && (
+            <div className="mt-6 flex justify-center">
+              <button
+                className="rounded-md bg-white/5 px-5 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Load more
+              </button>
+            </div>
+          )}
         </div>
       </main>
 
