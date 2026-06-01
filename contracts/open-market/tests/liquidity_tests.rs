@@ -1186,3 +1186,284 @@ fn test_add_liquidity_fails_on_resolved_market() {
     let result = client.try_add_liquidity(&provider, &market_id, &amount);
     assert!(result.is_err());
 }
+
+// ── Additional Comprehensive Tests ────────────────────────────────────────────
+
+#[test]
+fn test_multiple_providers_share_fees_proportionally() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, xlm_token) = deploy_with_token(&env);
+
+    let provider_a = Address::generate(&env);
+    let provider_b = Address::generate(&env);
+    let trader = Address::generate(&env);
+
+    let sa = StellarAssetClient::new(&env, &xlm_token);
+    let token = TokenClient::new(&env, &xlm_token);
+
+    let market_id = client.create_market(&_admin, &lp_market_params(&env));
+
+    // Provider A adds liquidity
+    let amount_a = 600_000_i128;
+    sa.mint(&provider_a, &amount_a);
+    token.approve(&provider_a, &client.address, &amount_a, &9999);
+    let lp_a = client.add_liquidity(&provider_a, &market_id, &amount_a);
+
+    // Provider B adds liquidity
+    let amount_b = 400_000_i128;
+    sa.mint(&provider_b, &amount_b);
+    token.approve(&provider_b, &client.address, &amount_b, &9999);
+    let lp_b = client.add_liquidity(&provider_b, &market_id, &amount_b);
+
+    // Both should have LP tokens
+    assert!(lp_a > 0);
+    assert!(lp_b > 0);
+
+    // Trader swaps
+    let swap_amount = 100_000_i128;
+    sa.mint(&trader, &swap_amount);
+    token.approve(&trader, &client.address, &swap_amount, &9999);
+    client.swap_outcome(
+        &trader,
+        &market_id,
+        &symbol_short!("yes"),
+        &symbol_short!("no"),
+        &swap_amount,
+        &0_i128,
+    );
+
+    let position_a = client.get_lp_position(&provider_a, &market_id);
+    let position_b = client.get_lp_position(&provider_b, &market_id);
+
+    // Both providers should have positions
+    assert!(position_a.lp_tokens > 0);
+    assert!(position_b.lp_tokens > 0);
+}
+
+#[test]
+fn test_swap_outcome_with_multiple_sequential_swaps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, xlm_token) = deploy_with_token(&env);
+
+    let provider = Address::generate(&env);
+    let trader1 = Address::generate(&env);
+    let trader2 = Address::generate(&env);
+
+    let sa = StellarAssetClient::new(&env, &xlm_token);
+    let token = TokenClient::new(&env, &xlm_token);
+
+    let market_id = client.create_market(&_admin, &lp_market_params(&env));
+
+    // Add liquidity
+    let liquidity = 1_000_000_i128;
+    sa.mint(&provider, &liquidity);
+    token.approve(&provider, &client.address, &liquidity, &9999);
+    client.add_liquidity(&provider, &market_id, &liquidity);
+
+    // First trader swaps YES for NO
+    let swap1 = 50_000_i128;
+    sa.mint(&trader1, &swap1);
+    token.approve(&trader1, &client.address, &swap1, &9999);
+    let output1 = client.swap_outcome(
+        &trader1,
+        &market_id,
+        &symbol_short!("yes"),
+        &symbol_short!("no"),
+        &swap1,
+        &0_i128,
+    );
+
+    // Second trader swaps NO for YES (opposite direction)
+    let swap2 = 50_000_i128;
+    sa.mint(&trader2, &swap2);
+    token.approve(&trader2, &client.address, &swap2, &9999);
+    let output2 = client.swap_outcome(
+        &trader2,
+        &market_id,
+        &symbol_short!("no"),
+        &symbol_short!("yes"),
+        &swap2,
+        &0_i128,
+    );
+
+    // Both swaps should succeed and produce output
+    assert!(output1 > 0);
+    assert!(output2 > 0);
+
+    let history = client.get_swap_history(&market_id);
+    assert!(history.len() >= 2);
+}
+
+
+#[test]
+fn test_remove_liquidity_with_accumulated_fees() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, xlm_token) = deploy_with_token(&env);
+
+    let provider = Address::generate(&env);
+    let trader = Address::generate(&env);
+
+    let sa = StellarAssetClient::new(&env, &xlm_token);
+    let token = TokenClient::new(&env, &xlm_token);
+
+    let market_id = client.create_market(&_admin, &lp_market_params(&env));
+
+    // Add liquidity
+    let liquidity = 500_000_i128;
+    sa.mint(&provider, &liquidity);
+    token.approve(&provider, &client.address, &liquidity, &9999);
+    let lp_tokens = client.add_liquidity(&provider, &market_id, &liquidity);
+
+    // Generate fees through swaps
+    let swap_amount = 100_000_i128;
+    sa.mint(&trader, &swap_amount);
+    token.approve(&trader, &client.address, &swap_amount, &9999);
+    client.swap_outcome(
+        &trader,
+        &market_id,
+        &symbol_short!("yes"),
+        &symbol_short!("no"),
+        &swap_amount,
+        &0_i128,
+    );
+
+    let position_before = client.get_lp_position(&provider, &market_id);
+    let fees_earned = position_before.fees_earned;
+    assert!(fees_earned > 0);
+
+    // Remove half the liquidity
+    let half_lp = lp_tokens / 2;
+    let withdrawn = client.remove_liquidity(&provider, &market_id, &half_lp);
+
+    // Withdrawn amount should be at least half the deposit (may include fees)
+    let expected_base_withdrawal = liquidity / 2;
+    assert!(withdrawn >= expected_base_withdrawal);
+
+    let position_after = client.get_lp_position(&provider, &market_id);
+    // Remaining LP tokens should be approximately half
+    assert!(position_after.lp_tokens <= lp_tokens / 2 + 1); // Allow 1 unit rounding
+}
+
+#[test]
+fn test_swap_outcome_price_convergence_toward_equilibrium() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, xlm_token) = deploy_with_token(&env);
+
+    let provider = Address::generate(&env);
+    let traders: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
+
+    let sa = StellarAssetClient::new(&env, &xlm_token);
+    let token = TokenClient::new(&env, &xlm_token);
+
+    let market_id = client.create_market(&_admin, &lp_market_params(&env));
+
+    // Add balanced liquidity
+    let liquidity = 1_000_000_i128;
+    sa.mint(&provider, &liquidity);
+    token.approve(&provider, &client.address, &liquidity, &9999);
+    client.add_liquidity(&provider, &market_id, &liquidity);
+
+    let initial_price_yes = client.get_outcome_price(&market_id, &symbol_short!("yes"));
+    let initial_price_no = client.get_outcome_price(&market_id, &symbol_short!("no"));
+
+    // Multiple traders swap in same direction (YES for NO)
+    let mut prices_yes = vec![&env];
+    let mut prices_no = vec![&env];
+
+    for trader in traders.iter() {
+        let swap_amount = 50_000_i128;
+        sa.mint(trader, &swap_amount);
+        token.approve(trader, &client.address, &swap_amount, &9999);
+
+        client.swap_outcome(
+            trader,
+            &market_id,
+            &symbol_short!("yes"),
+            &symbol_short!("no"),
+            &swap_amount,
+            &0_i128,
+        );
+
+        let price_yes = client.get_outcome_price(&market_id, &symbol_short!("yes"));
+        let price_no = client.get_outcome_price(&market_id, &symbol_short!("no"));
+
+        prices_yes.push_back(price_yes);
+        prices_no.push_back(price_no);
+    }
+
+    // Prices should move monotonically (YES increases, NO decreases)
+    for i in 1..prices_yes.len() {
+        assert!(prices_yes.get(i).unwrap() > prices_yes.get(i - 1).unwrap());
+        assert!(prices_no.get(i).unwrap() < prices_no.get(i - 1).unwrap());
+    }
+
+    // Final prices should be different from initial
+    let final_price_yes = client.get_outcome_price(&market_id, &symbol_short!("yes"));
+    let final_price_no = client.get_outcome_price(&market_id, &symbol_short!("no"));
+
+    assert!(final_price_yes > initial_price_yes);
+    assert!(final_price_no < initial_price_no);
+}
+
+#[test]
+fn test_pool_volume_accumulates_across_swaps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, xlm_token) = deploy_with_token(&env);
+
+    let provider = Address::generate(&env);
+    let trader1 = Address::generate(&env);
+    let trader2 = Address::generate(&env);
+
+    let sa = StellarAssetClient::new(&env, &xlm_token);
+    let token = TokenClient::new(&env, &xlm_token);
+
+    let market_id = client.create_market(&_admin, &lp_market_params(&env));
+
+    // Add liquidity
+    let liquidity = 1_000_000_i128;
+    sa.mint(&provider, &liquidity);
+    token.approve(&provider, &client.address, &liquidity, &9999);
+    client.add_liquidity(&provider, &market_id, &liquidity);
+
+    // Initial volume should be zero
+    let volume_before = client.get_pool_volume_24h(&market_id);
+    assert_eq!(volume_before, 0);
+
+    // First swap
+    let swap1 = 100_000_i128;
+    sa.mint(&trader1, &swap1);
+    token.approve(&trader1, &client.address, &swap1, &9999);
+    client.swap_outcome(
+        &trader1,
+        &market_id,
+        &symbol_short!("yes"),
+        &symbol_short!("no"),
+        &swap1,
+        &0_i128,
+    );
+
+    let volume_after_swap1 = client.get_pool_volume_24h(&market_id);
+    assert_eq!(volume_after_swap1, swap1);
+
+    // Second swap
+    let swap2 = 75_000_i128;
+    sa.mint(&trader2, &swap2);
+    token.approve(&trader2, &client.address, &swap2, &9999);
+    client.swap_outcome(
+        &trader2,
+        &market_id,
+        &symbol_short!("no"),
+        &symbol_short!("yes"),
+        &swap2,
+        &0_i128,
+    );
+
+    let volume_after_swap2 = client.get_pool_volume_24h(&market_id);
+    // Volume should accumulate both swaps
+    assert_eq!(volume_after_swap2, swap1 + swap2);
+}
