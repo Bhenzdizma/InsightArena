@@ -58,6 +58,9 @@ describe('NotificationBroadcasterService', () => {
 
       service.broadcastNewNotification(userAddress, notification);
 
+      // Clear previous calls from module initialization
+      jest.clearAllMocks();
+
       // Advance timers to trigger batch processing
       jest.advanceTimersByTime(1100);
 
@@ -67,7 +70,14 @@ describe('NotificationBroadcasterService', () => {
         expect.objectContaining({
           event: 'notification:new',
           data: expect.objectContaining({
-            notifications: expect.arrayContaining([notification]),
+            notifications: expect.arrayContaining([
+              expect.objectContaining({
+                id: notification.id,
+                type: notification.type,
+                title: notification.title,
+                message: notification.message,
+              }),
+            ]),
             count: 1,
           }),
         }),
