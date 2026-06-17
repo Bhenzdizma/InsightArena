@@ -54,9 +54,7 @@ export interface CreatorEvent {
   pointsMultiplier: number;
   joined?: boolean;
   startTime?: string;
-  prizePool?: number;
   rewardDistribution?: RewardDistribution;
-  entryFee?: number;
   category?: string;
   bannerUrl?: string;
 }
@@ -976,9 +974,7 @@ export function CreatorEventsProvider({
         pointsMultiplier: 1,
         joined: false,
         startTime: input.startTime,
-        prizePool: input.prizePool,
         rewardDistribution: input.rewardDistribution,
-        entryFee: input.entryFee,
         category: input.category,
         bannerUrl: input.bannerUrl,
       };
