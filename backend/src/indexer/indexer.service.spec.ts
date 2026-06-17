@@ -280,7 +280,10 @@ describe('IndexerService', () => {
           }),
         );
         const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-        const body = JSON.parse(String(init.body)) as {
+        if (typeof init.body !== 'string') {
+          throw new Error('Expected Soroban RPC request body to be a string');
+        }
+        const body = JSON.parse(init.body) as {
           params: { xdrFormat?: string };
         };
         expect(body.params.xdrFormat).toBe('json');

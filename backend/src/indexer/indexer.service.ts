@@ -311,8 +311,7 @@ export class IndexerService implements OnModuleInit {
     const topicStr = lowerTopics.join('.');
     const hasTopicPair = (domain: string, action: string): boolean =>
       lowerTopics.some(
-        (topic, index) =>
-          topic === domain && lowerTopics[index + 1] === action,
+        (topic, index) => topic === domain && lowerTopics[index + 1] === action,
       );
 
     if (topicStr.includes('eventcreated') || hasTopicPair('event', 'created'))
@@ -337,7 +336,10 @@ export class IndexerService implements OnModuleInit {
       hasTopicPair('event', 'winners_verified')
     )
       return 'WinnersVerified';
-    if (topicStr.includes('eventcancelled') || hasTopicPair('event', 'cancelled'))
+    if (
+      topicStr.includes('eventcancelled') ||
+      hasTopicPair('event', 'cancelled')
+    )
       return 'EventCancelled';
     if (topicStr.includes('feeupdated')) return 'FeeUpdated';
     if (topicStr.includes('addressverified')) return 'AddressVerified';
@@ -572,9 +574,7 @@ export class IndexerService implements OnModuleInit {
     const endTime =
       parsedEndTime && parsedEndTime.getTime() > startTime.getTime()
         ? parsedEndTime
-        : new Date(
-            startTime.getTime() + DEFAULT_EVENT_DURATION_SECONDS * 1000,
-          );
+        : new Date(startTime.getTime() + DEFAULT_EVENT_DURATION_SECONDS * 1000);
 
     const creatorEvent = this.creatorEventRepository.create({
       on_chain_event_id: onChainEventId,
@@ -1163,7 +1163,10 @@ export class IndexerService implements OnModuleInit {
     return null;
   }
 
-  private readNumberArray(data: Record<string, unknown>, key: string): number[] {
+  private readNumberArray(
+    data: Record<string, unknown>,
+    key: string,
+  ): number[] {
     const unwrapped = this.unwrapIndexerValue(data[key]);
     const val =
       unwrapped &&
@@ -1205,11 +1208,7 @@ export class IndexerService implements OnModuleInit {
     key: string,
   ): Date | null {
     const seconds = this.readNum(data, key);
-    if (
-      seconds === null ||
-      seconds <= 0 ||
-      !Number.isSafeInteger(seconds)
-    ) {
+    if (seconds === null || seconds <= 0 || !Number.isSafeInteger(seconds)) {
       return null;
     }
 
