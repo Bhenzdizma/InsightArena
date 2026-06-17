@@ -8,7 +8,7 @@
 /// the returned ID immediately.
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::storage_types::{DataKey, Event, Match, Prediction, Winner};
+use crate::storage_types::{DataKey, Event, Match, Prediction};
 
 // ---------------------------------------------------------------------------
 // TTL constant
@@ -256,31 +256,6 @@ pub fn add_event_participant(env: &Env, event_id: u64, participant: &Address) {
     let key = DataKey::EventParticipants(event_id);
     let mut list = get_event_participants(env, event_id);
     list.push_back(participant.clone());
-    env.storage().persistent().set(&key, &list);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);
-}
-
-/// Return the list of verified winners for an event.
-pub fn get_event_winners(env: &Env, event_id: u64) -> Vec<Winner> {
-    let key = DataKey::EventWinners(event_id);
-    match env.storage().persistent().get::<DataKey, Vec<Winner>>(&key) {
-        Some(list) => {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);
-            list
-        }
-        None => Vec::new(env),
-    }
-}
-
-/// Append a winner to the event's winners list.
-pub fn add_event_winner(env: &Env, event_id: u64, winner: &Winner) {
-    let key = DataKey::EventWinners(event_id);
-    let mut list = get_event_winners(env, event_id);
-    list.push_back(winner.clone());
     env.storage().persistent().set(&key, &list);
     env.storage()
         .persistent()

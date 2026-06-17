@@ -1,10 +1,10 @@
 /// Tests for aggregate event statistics views.
 use creator_event_manager::storage;
-use creator_event_manager::storage_types::{Match, MatchResult, Prediction, Winner};
+use creator_event_manager::storage_types::{Match, MatchResult, Prediction};
 use creator_event_manager::CreatorEventManagerContractClient;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::token::StellarAssetClient;
-use soroban_sdk::{Address, Env, String, Symbol};
+use soroban_sdk::{Address, Env, String};
 
 const FEE: i128 = 1_000_000;
 
@@ -87,8 +87,10 @@ fn add_prediction(env: &Env, event_id: u64, match_id: u64, predictor: &Address) 
         match_id,
         event_id,
         predictor.clone(),
-        Symbol::new(env, "TEAM_A"),
+        2u32,
+        1u32,
         env.ledger().timestamp(),
+        env,
     );
     storage::set_prediction(env, prediction_id, &prediction);
     storage::add_match_prediction(env, match_id, prediction_id);
@@ -224,15 +226,12 @@ fn test_event_statistics_are_accurate() {
     assert_eq!(statistics.match_count, 2);
     assert_eq!(statistics.total_predictions, 3);
     assert!(!statistics.all_matches_resolved);
-    assert!(!statistics.winners_verified);
-    assert_eq!(statistics.winner_count, 0);
 }
 
 #[test]
 fn test_event_statistics_completion_status() {
     let (env, client, contract_id, xlm_token) = setup();
     let creator = Address::generate(&env);
-    let winner = Address::generate(&env);
     fund(&env, &xlm_token, &creator, FEE);
 
     let start_time = get_future_time(&env, 3600);
@@ -253,8 +252,6 @@ fn test_event_statistics_completion_status() {
 
     let pending_statistics = client.get_event_statistics(&event_id);
     assert!(!pending_statistics.all_matches_resolved);
-    assert!(!pending_statistics.winners_verified);
-    assert_eq!(pending_statistics.winner_count, 0);
 
     env.as_contract(&contract_id, || {
         for match_id in storage::get_event_matches(&env, event_id).iter() {
@@ -270,15 +267,10 @@ fn test_event_statistics_completion_status() {
                 storage::set_match(&env, match_id, &match_record);
             }
         }
-
-        let verified_winner = Winner::new(winner, event_id, 2, 2, 100, env.ledger().timestamp());
-        storage::add_event_winner(&env, event_id, &verified_winner);
     });
 
     let completed_statistics = client.get_event_statistics(&event_id);
     assert!(completed_statistics.all_matches_resolved);
-    assert!(completed_statistics.winners_verified);
-    assert_eq!(completed_statistics.winner_count, 1);
 }
 
 #[test]

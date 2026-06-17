@@ -6,7 +6,7 @@ import { ArrowLeft, BarChart3, Plus, ShieldCheck, UserPlus, XCircle } from "luci
 
 import EventHeader from "@/component/creator-events/EventHeader";
 import EventLeaderboard, {
-  type EventLeaderboardRow,
+  type LeaderboardEntry,
 } from "@/component/creator-events/EventLeaderboard";
 import MatchList from "@/component/creator-events/MatchList";
 import ParticipantList, {
@@ -25,13 +25,48 @@ import { cn } from "@/lib/utils";
 
 const fallbackParticipants: Record<string, Participant[]> = {
   "event-002": [
-    { address: "GALP2...Z91Q", joinedAt: "2026-05-06T14:30:00Z", score: 3 },
-    { address: "GC7RB...1KYV", joinedAt: "2026-05-06T15:05:00Z", score: 3 },
-    { address: "GDL9N...8TWF", joinedAt: "2026-05-07T09:45:00Z", score: 2 },
+    {
+      address: "GALP2...Z91Q",
+      joinedAt: "2026-05-06T14:30:00Z",
+      score: 3,
+      predictions: 3,
+      correctPredictions: 3,
+      pointsEarned: 300,
+    },
+    {
+      address: "GC7RB...1KYV",
+      joinedAt: "2026-05-06T15:05:00Z",
+      score: 3,
+      predictions: 3,
+      correctPredictions: 3,
+      pointsEarned: 300,
+    },
+    {
+      address: "GDL9N...8TWF",
+      joinedAt: "2026-05-07T09:45:00Z",
+      score: 2,
+      predictions: 3,
+      correctPredictions: 2,
+      pointsEarned: 200,
+    },
   ],
   "event-003": [
-    { address: "GB82Q...HJ4X", joinedAt: "2026-05-22T12:10:00Z", score: 1 },
-    { address: "GCN65...P0LR", joinedAt: "2026-05-23T08:20:00Z", score: 0 },
+    {
+      address: "GB82Q...HJ4X",
+      joinedAt: "2026-05-22T12:10:00Z",
+      score: 1,
+      predictions: 1,
+      correctPredictions: 1,
+      pointsEarned: 100,
+    },
+    {
+      address: "GCN65...P0LR",
+      joinedAt: "2026-05-23T08:20:00Z",
+      score: 0,
+      predictions: 1,
+      correctPredictions: 0,
+      pointsEarned: 0,
+    },
   ],
 };
 
@@ -56,20 +91,58 @@ function buildParticipantRows(
   }));
 }
 
-function buildLeaderboardRows(
-  participantRows: EventParticipantRow[],
+function buildLeaderboardEntries(
+  participants: Participant[],
+  eventId: string,
   totalMatches: number,
-): EventLeaderboardRow[] {
-  if (totalMatches === 0) return [];
+  isFinalized: boolean,
+): LeaderboardEntry[] {
+  const source = participants.length > 0 ? participants : fallbackParticipants[eventId] ?? [];
+  if (source.length === 0) return [];
 
-  return participantRows
-    .filter((participant) => participant.correctPredictions === totalMatches)
-    .map((participant, index) => ({
-      rank: index + 1,
-      address: participant.address,
-      score: `${participant.correctPredictions} / ${participant.totalMatches}`,
-      completionTime: new Date(participant.joinedAt).toLocaleString(),
-    }));
+  const entries = source.map((p) => {
+    const isHighPoints = p.score > totalMatches;
+    let points = p.score;
+    let correctResults = 0;
+    let exactScores = 0;
+    let matchesPlayed = totalMatches;
+
+    if (isHighPoints) {
+      points = p.score;
+      correctResults = Math.min(totalMatches, Math.floor(p.score / 100));
+      const remainder = p.score % 100;
+      exactScores = Math.min(correctResults, Math.floor(remainder / 10));
+    } else {
+      correctResults = Math.max(0, Math.min(totalMatches, p.score));
+      exactScores = correctResults >= 2 ? 1 : 0;
+      points = correctResults * 100 + exactScores * 10;
+    }
+
+    return {
+      address: p.address,
+      points,
+      correctResults,
+      exactScores,
+      matchesPlayed,
+    };
+  });
+
+  const sortedEntries = [...entries].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.correctResults !== a.correctResults) return b.correctResults - a.correctResults;
+    return b.exactScores - a.exactScores;
+  });
+
+  let currentRank = 1;
+  return sortedEntries.map((entry, index) => {
+    if (index > 0 && sortedEntries[index - 1].points > entry.points) {
+      currentRank = index + 1;
+    }
+    return {
+      ...entry,
+      rank: currentRank,
+    };
+  });
 }
 
 function getResolvedMatches(matches: CreatorEventMatch[]) {
@@ -103,7 +176,7 @@ export default function CreatorEventDetailPage() {
   const [event, setEvent] = useState<CreatorEvent | null>(null);
   const [matches, setMatches] = useState<CreatorEventMatch[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [verifiedWinners, setVerifiedWinners] = useState<EventLeaderboardRow[]>([]);
+  const [verifiedWinners, setVerifiedWinners] = useState<LeaderboardEntry[]>([]);
   const [inviteCode, setInviteCode] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -138,12 +211,36 @@ export default function CreatorEventDetailPage() {
       setParticipants(participantResult);
       setIsJoined(Boolean(eventResult?.joined));
       setVerifiedWinners(
-        winnerResult.map((winner) => ({
-          rank: winner.rank,
-          address: winner.address,
-          score: `${winner.score}`,
-          completionTime: "Verified",
-        })),
+        winnerResult.map((winner) => {
+          const scoreVal = winner.score;
+          const matchCount = matchResult.length;
+          const isHighPoints = scoreVal > matchCount;
+          let points = scoreVal;
+          let correctResults = 0;
+          let exactScores = 0;
+          let matchesPlayed = matchCount;
+
+          if (isHighPoints) {
+            points = scoreVal;
+            correctResults = Math.min(matchCount, Math.floor(scoreVal / 100));
+            const remainder = scoreVal % 100;
+            exactScores = Math.min(correctResults, Math.floor(remainder / 10));
+          } else {
+            correctResults = Math.max(0, Math.min(matchCount, scoreVal));
+            exactScores = correctResults >= 2 ? 1 : 0;
+            points = correctResults * 100 + exactScores * 10;
+          }
+
+          return {
+            rank: winner.rank,
+            address: winner.address,
+            points,
+            correctResults,
+            exactScores,
+            matchesPlayed,
+            payout: winner.rank === 1 ? "150 XLM" : winner.rank === 2 ? "90 XLM" : winner.rank === 3 ? "60 XLM" : "-",
+          };
+        }),
       );
       setIsLoading(false);
     }
@@ -162,11 +259,24 @@ export default function CreatorEventDetailPage() {
 
   const resolvedMatches = useMemo(() => getResolvedMatches(matches), [matches]);
   const allMatchesResolved = matches.length > 0 && resolvedMatches.length === matches.length;
-  const derivedWinners = useMemo(
-    () => buildLeaderboardRows(participantRows, matches.length),
-    [matches.length, participantRows],
-  );
-  const leaderboardRows = verifiedWinners.length > 0 ? verifiedWinners : derivedWinners;
+
+  const isFinalized = event?.status === "Completed" || verifiedWinners.length > 0;
+
+  const leaderboardEntries = useMemo(() => {
+    const entries = buildLeaderboardEntries(participants, eventId, matches.length, isFinalized);
+
+    if (isFinalized) {
+      return entries.map((entry) => {
+        const verified = verifiedWinners.find((w) => w.address === entry.address);
+        return {
+          ...entry,
+          payout: verified?.payout || (entry.rank === 1 ? "150 XLM" : entry.rank === 2 ? "90 XLM" : entry.rank === 3 ? "60 XLM" : "-"),
+        };
+      });
+    }
+
+    return entries;
+  }, [isFinalized, verifiedWinners, participants, eventId, matches.length]);
 
   const isCreator = Boolean(address && event?.creator === address);
   const pendingMatches = matches.filter((match) => match.outcome === "Pending");
@@ -198,7 +308,7 @@ export default function CreatorEventDetailPage() {
     setIsVerifying(false);
 
     if (success) {
-      setVerifiedWinners(derivedWinners);
+      setVerifiedWinners(leaderboardEntries);
       setActionMessage("Winner verification completed.");
     } else {
       setActionMessage("Winner verification failed.");
@@ -268,6 +378,8 @@ export default function CreatorEventDetailPage() {
           maxParticipants={event.maxParticipants}
           createdAt={event.createdAt}
           inviteCode={isCreator ? event.inviteCode : undefined}
+          category={event.category}
+          bannerUrl={event.bannerUrl}
         />
 
         <section className="rounded-3xl border border-white/10 bg-slate-900/80 p-5">
@@ -374,7 +486,7 @@ export default function CreatorEventDetailPage() {
             <ParticipantList participants={participantRows} />
           </TabsContent>
           <TabsContent value="leaderboard">
-            <EventLeaderboard winners={leaderboardRows} />
+            <EventLeaderboard entries={leaderboardEntries} isFinalized={isFinalized} />
           </TabsContent>
         </Tabs>
 

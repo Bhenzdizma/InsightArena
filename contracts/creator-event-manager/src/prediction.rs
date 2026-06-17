@@ -53,13 +53,6 @@ fn emit_prediction_submitted(
     );
 }
 
-fn is_valid_outcome(env: &Env, predicted_outcome: &Symbol) -> bool {
-    let team_a = Symbol::new(env, crate::storage_types::OUTCOME_TEAM_A);
-    let team_b = Symbol::new(env, crate::storage_types::OUTCOME_TEAM_B);
-    let draw = Symbol::new(env, crate::storage_types::OUTCOME_DRAW);
-    *predicted_outcome == team_a || *predicted_outcome == team_b || *predicted_outcome == draw
-}
-
 fn user_already_predicted_match(
     env: &Env,
     predictor: &Address,
@@ -122,11 +115,15 @@ pub fn join_event(env: &Env, user: Address, invite_code: Symbol) -> Result<(), P
 }
 
 /// Submit a prediction for a match inside a joined event.
+///
+/// Takes a predicted scoreline (home_score, away_score) and derives the
+/// predicted outcome (1X2 result) from it.
 pub fn submit_prediction(
     env: &Env,
     predictor: Address,
     match_id: u64,
-    predicted_outcome: Symbol,
+    predicted_home_score: u32,
+    predicted_away_score: u32,
 ) -> Result<u64, PredictionError> {
     predictor.require_auth();
 
@@ -156,10 +153,6 @@ pub fn submit_prediction(
         return Err(PredictionError::MatchStarted);
     }
 
-    if !is_valid_outcome(env, &predicted_outcome) {
-        return Err(PredictionError::InvalidOutcome);
-    }
-
     if user_already_predicted_match(env, &predictor, event.event_id, match_id) {
         return Err(PredictionError::AlreadyPredicted);
     }
@@ -170,8 +163,10 @@ pub fn submit_prediction(
         match_id,
         event.event_id,
         predictor.clone(),
-        predicted_outcome.clone(),
+        predicted_home_score,
+        predicted_away_score,
         now,
+        env,
     );
 
     storage::set_prediction(env, prediction_id, &prediction);
@@ -184,7 +179,7 @@ pub fn submit_prediction(
         match_id,
         event.event_id,
         &predictor,
-        &predicted_outcome,
+        &prediction.predicted_outcome,
     );
 
     Ok(prediction_id)

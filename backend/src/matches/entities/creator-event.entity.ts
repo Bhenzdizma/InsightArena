@@ -23,6 +23,8 @@ import { Match } from './match.entity';
   'start_time',
   'end_time',
 ])
+@Index(['is_finalized'])
+@Index(['end_time'])
 export class CreatorEvent {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -66,9 +68,6 @@ export class CreatorEvent {
   @Column({ type: 'varchar', length: 2048, nullable: true })
   banner_url: string | null;
 
-  @Column({ default: false })
-  is_finalized: boolean;
-
   @Column({ default: true })
   is_active: boolean;
 
@@ -86,6 +85,9 @@ export class CreatorEvent {
 
   @Column({ default: 0 })
   match_count: number;
+
+  @Column({ default: false })
+  is_finalized: boolean;
 
   @OneToMany(() => Match, (match) => match.event)
   matches: Match[];

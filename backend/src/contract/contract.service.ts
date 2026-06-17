@@ -36,6 +36,8 @@ export interface ContractMatch {
   eventId: string;
   homeTeam: string;
   awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
   startTime: number;
   resolved: boolean;
   outcome: string | null;

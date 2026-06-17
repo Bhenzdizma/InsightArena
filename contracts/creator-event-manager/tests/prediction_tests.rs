@@ -181,7 +181,7 @@ fn test_join_event_increments_participant_count() {
 }
 
 #[test]
-fn test_submit_prediction_valid_succeeds() {
+fn test_submit_prediction_stores_scoreline() {
     let (env, client, contract_id, _admin, xlm_token) = setup();
     let creator = Address::generate(&env);
     let predictor = Address::generate(&env);
@@ -190,8 +190,7 @@ fn test_submit_prediction_valid_succeeds() {
 
     client.join_event(&predictor, &invite_code);
 
-    let prediction_id =
-        client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
+    let prediction_id = client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
 
     assert_eq!(prediction_id, 1);
 
@@ -199,6 +198,8 @@ fn test_submit_prediction_valid_succeeds() {
     assert_eq!(prediction.prediction_id, prediction_id);
     assert_eq!(prediction.match_id, match_id);
     assert_eq!(prediction.predictor, predictor);
+    assert_eq!(prediction.predicted_home_score, 2);
+    assert_eq!(prediction.predicted_away_score, 1);
     assert_eq!(prediction.predicted_outcome, Symbol::new(&env, "TEAM_A"));
 }
 
@@ -211,7 +212,7 @@ fn test_submit_prediction_non_participant_rejected() {
     let (_event_id, _invite_code, match_id) =
         create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
 
-    client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
 }
 
 #[test]
@@ -226,20 +227,7 @@ fn test_submit_prediction_late_prediction_rejected() {
     client.join_event(&predictor, &invite_code);
     env.ledger().with_mut(|ledger| ledger.timestamp += 10);
 
-    client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
-}
-
-#[test]
-#[should_panic(expected = "invalid_outcome")]
-fn test_submit_prediction_invalid_outcome_rejected() {
-    let (env, client, contract_id, _admin, xlm_token) = setup();
-    let creator = Address::generate(&env);
-    let predictor = Address::generate(&env);
-    let (_event_id, invite_code, match_id) =
-        create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
-
-    client.join_event(&predictor, &invite_code);
-    client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "INVALID"));
+    client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
 }
 
 #[test]
@@ -252,8 +240,8 @@ fn test_submit_prediction_duplicate_rejected() {
         create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
 
     client.join_event(&predictor, &invite_code);
-    client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
+    client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
 }
 
 #[test]
@@ -273,7 +261,7 @@ fn test_submit_prediction_cancelled_event_blocks_prediction() {
         storage::set_event(&env, event_id, &event);
     });
 
-    client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
 }
 
 #[test]
@@ -285,8 +273,7 @@ fn test_get_prediction_returns_existing_prediction() {
         create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
 
     client.join_event(&predictor, &invite_code);
-    let prediction_id =
-        client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
+    let prediction_id = client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
 
     let prediction = client.get_prediction(&prediction_id);
     assert_eq!(prediction.prediction_id, prediction_id);
@@ -309,8 +296,7 @@ fn test_get_prediction_extends_ttl() {
         create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
 
     client.join_event(&predictor, &invite_code);
-    let prediction_id =
-        client.submit_prediction(&predictor, &match_id, &Symbol::new(&env, "TEAM_A"));
+    let prediction_id = client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
 
     let current_ledger = env.ledger().get().sequence_number;
     env.ledger().set_sequence_number(current_ledger + 1);
@@ -319,17 +305,12 @@ fn test_get_prediction_extends_ttl() {
     assert_eq!(prediction.prediction_id, prediction_id);
 }
 
-// ---------------------------------------------------------------------------
-// get_user_predictions tests (#807)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_get_user_predictions_returns_all_for_event() {
     let (env, client, contract_id, _admin, xlm_token) = setup();
     let creator = Address::generate(&env);
     let predictor = Address::generate(&env);
 
-    // Create event with two matches
     fund(&env, &xlm_token, &creator, FEE);
     let start_time = get_future_time(&env, 3600);
     let end_time = get_future_time(&env, 7200);
@@ -380,8 +361,8 @@ fn test_get_user_predictions_returns_all_for_event() {
     });
 
     client.join_event(&predictor, &invite_code);
-    client.submit_prediction(&predictor, &match_id_1, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&predictor, &match_id_2, &Symbol::new(&env, "DRAW"));
+    client.submit_prediction(&predictor, &match_id_1, &2u32, &1u32);
+    client.submit_prediction(&predictor, &match_id_2, &1u32, &1u32);
 
     let predictions = client.get_user_predictions(&predictor, &event_id);
     assert_eq!(predictions.len(), 2);
@@ -417,7 +398,6 @@ fn test_get_user_predictions_sorted_by_predicted_at() {
         &end_time,
     );
 
-    // Create two matches with different future times
     let (match_id_1, match_id_2) = env.as_contract(&contract_id, || {
         let m1 = storage::next_match_id(&env);
         storage::set_match(
@@ -457,18 +437,15 @@ fn test_get_user_predictions_sorted_by_predicted_at() {
 
     client.join_event(&predictor, &invite_code);
 
-    // Submit first prediction at timestamp T
-    client.submit_prediction(&predictor, &match_id_1, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&predictor, &match_id_1, &1u32, &0u32);
 
-    // Advance ledger time so second prediction has a later timestamp
     env.ledger().with_mut(|l| l.timestamp += 100);
 
-    client.submit_prediction(&predictor, &match_id_2, &Symbol::new(&env, "TEAM_B"));
+    client.submit_prediction(&predictor, &match_id_2, &2u32, &1u32);
 
     let predictions = client.get_user_predictions(&predictor, &event_id);
     assert_eq!(predictions.len(), 2);
 
-    // Verify ascending order
     let first = predictions.get(0).unwrap();
     let second = predictions.get(1).unwrap();
     assert!(
@@ -485,21 +462,18 @@ fn test_get_user_predictions_multiple_events_dont_mix() {
     let creator = Address::generate(&env);
     let predictor = Address::generate(&env);
 
-    // Event 1
     let (event_id_1, invite_code_1, match_id_1) =
         create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
 
-    // Event 2
     let (event_id_2, invite_code_2, match_id_2) =
         create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, 10_000);
 
     client.join_event(&predictor, &invite_code_1);
     client.join_event(&predictor, &invite_code_2);
 
-    client.submit_prediction(&predictor, &match_id_1, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&predictor, &match_id_2, &Symbol::new(&env, "TEAM_B"));
+    client.submit_prediction(&predictor, &match_id_1, &1u32, &0u32);
+    client.submit_prediction(&predictor, &match_id_2, &2u32, &1u32);
 
-    // Each event should only contain its own prediction
     let preds_event_1 = client.get_user_predictions(&predictor, &event_id_1);
     let preds_event_2 = client.get_user_predictions(&predictor, &event_id_2);
 
@@ -508,10 +482,6 @@ fn test_get_user_predictions_multiple_events_dont_mix() {
     assert_eq!(preds_event_1.get(0).unwrap().match_id, match_id_1);
     assert_eq!(preds_event_2.get(0).unwrap().match_id, match_id_2);
 }
-
-// ---------------------------------------------------------------------------
-// get_prediction_distribution tests (#809)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_get_prediction_distribution_correct_counts() {
@@ -528,9 +498,9 @@ fn test_get_prediction_distribution_correct_counts() {
     client.join_event(&user_b, &invite_code);
     client.join_event(&user_draw, &invite_code);
 
-    client.submit_prediction(&user_a, &match_id, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&user_b, &match_id, &Symbol::new(&env, "TEAM_B"));
-    client.submit_prediction(&user_draw, &match_id, &Symbol::new(&env, "DRAW"));
+    client.submit_prediction(&user_a, &match_id, &1u32, &0u32);
+    client.submit_prediction(&user_b, &match_id, &0u32, &1u32);
+    client.submit_prediction(&user_draw, &match_id, &1u32, &1u32);
 
     let (team_a, team_b, draw) = client.get_prediction_distribution(&match_id);
     assert_eq!(team_a, 1);
@@ -566,9 +536,9 @@ fn test_get_prediction_distribution_all_same_outcome() {
     client.join_event(&user2, &invite_code);
     client.join_event(&user3, &invite_code);
 
-    client.submit_prediction(&user1, &match_id, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&user2, &match_id, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&user3, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&user1, &match_id, &1u32, &0u32);
+    client.submit_prediction(&user2, &match_id, &2u32, &0u32);
+    client.submit_prediction(&user3, &match_id, &3u32, &0u32);
 
     let (team_a, team_b, draw) = client.get_prediction_distribution(&match_id);
     assert_eq!(team_a, 3);
@@ -632,8 +602,8 @@ fn test_get_prediction_distribution_multiple_matches_independent() {
     });
 
     client.join_event(&user, &invite_code);
-    client.submit_prediction(&user, &match_id_1, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&user, &match_id_2, &Symbol::new(&env, "DRAW"));
+    client.submit_prediction(&user, &match_id_1, &1u32, &0u32);
+    client.submit_prediction(&user, &match_id_2, &1u32, &1u32);
 
     let (a1, b1, d1) = client.get_prediction_distribution(&match_id_1);
     let (a2, b2, d2) = client.get_prediction_distribution(&match_id_2);

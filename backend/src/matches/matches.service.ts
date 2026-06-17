@@ -50,6 +50,9 @@ export class MatchesService {
       match_time: match.match_time,
       result_submitted: match.result_submitted,
       winning_team: match.winning_team,
+      home_score: match.home_score,
+      away_score: match.away_score,
+      points_multiplier: match.points_multiplier,
       total_predictions: totalPredictions,
       prediction_distribution: distribution,
       event_info: {

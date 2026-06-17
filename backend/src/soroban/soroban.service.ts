@@ -45,6 +45,10 @@ export interface SorobanDisputeResult {
   tx_hash: string;
 }
 
+export interface SorobanFinalizeEventResult {
+  tx_hash: string;
+}
+
 @Injectable()
 export class SorobanService {
   private readonly logger = new Logger(SorobanService.name);
@@ -442,6 +446,99 @@ export class SorobanService {
 
       this.logger.log(`resolveDispute submitted: tx_hash=${tx_hash}`);
       return Promise.resolve({ dispute_id: disputeId, tx_hash });
+    });
+  }
+
+  /**
+   * Finalize an event on the Soroban contract.
+   * Permissionless operation that can be called once event.has_ended() is true
+   * and all matches have results.
+   *
+   * Invokes: finalize_event(event_id)
+   * Errors: EventNotEnded, MatchesNotResolved, EventAlreadyFinalized
+   */
+  async finalizeEvent(
+    onChainEventId: number,
+  ): Promise<SorobanFinalizeEventResult> {
+    return this.withSorobanErrorHandling('finalizeEvent', async () => {
+      this.logger.log(`Soroban finalizeEvent: event_id=${onChainEventId}`);
+
+      // Verify server keypair is valid
+      const serverKeypair = Keypair.fromSecret(this.serverSecretKey);
+      this.logger.debug(
+        `finalizeEvent signed by server: ${serverKeypair.publicKey()}`,
+      );
+
+      // Get server account for transaction
+      const serverAccount = await this.rpcServer.getAccount(
+        serverKeypair.publicKey(),
+      );
+
+      const contract = new Contract(this.contractId);
+
+      // Build the invocation
+      const tx = new TransactionBuilder(serverAccount, {
+        fee: '10000',
+        networkPassphrase:
+          this.network === 'testnet' ? Networks.TESTNET : Networks.PUBLIC,
+      })
+        .addOperation(
+          contract.call(
+            'finalize_event',
+            nativeToScVal(BigInt(onChainEventId), { type: 'u64' }),
+          ),
+        )
+        .setTimeout(30)
+        .build();
+
+      // Simulate
+      const simulation = await this.rpcServer.simulateTransaction(tx);
+      if (SorobanRpc.Api.isSimulationError(simulation)) {
+        throw new Error(`Simulation failed: ${simulation.error}`);
+      }
+
+      // Assemble and Sign
+      const assembledTx = SorobanRpc.assembleTransaction(
+        tx,
+        simulation,
+      ).build();
+      assembledTx.sign(serverKeypair);
+
+      // Submit
+      const response = await this.rpcServer.sendTransaction(assembledTx);
+      if (response.status === 'ERROR') {
+        throw new Error(
+          `Transaction submission failed: ${JSON.stringify(response.errorResult)}`,
+        );
+      }
+
+      this.logger.log(`finalizeEvent submitted: tx_hash=${response.hash}`);
+
+      // Wait for completion
+      let statusResponse = await this.rpcServer.getTransaction(response.hash);
+      let attempts = 0;
+      while (
+        statusResponse.status ===
+          SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+        attempts < 10
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        statusResponse = await this.rpcServer.getTransaction(response.hash);
+        attempts++;
+      }
+
+      if (
+        statusResponse.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS
+      ) {
+        this.logger.log(
+          `finalizeEvent transaction confirmed: tx_hash=${response.hash}`,
+        );
+        return { tx_hash: response.hash };
+      } else {
+        throw new Error(
+          `Transaction failed with status ${statusResponse.status}`,
+        );
+      }
     });
   }
 

@@ -17,6 +17,11 @@ pub const OUTCOME_TEAM_A: &str = "TEAM_A";
 pub const OUTCOME_TEAM_B: &str = "TEAM_B";
 pub const OUTCOME_DRAW: &str = "DRAW";
 
+/// Points awarded for predicting the correct 1X2 result (wrong scoreline)
+pub const POINTS_CORRECT_RESULT: u32 = 1;
+/// Points awarded for predicting the exact scoreline (in addition to result points)
+pub const POINTS_EXACT_SCORE: u32 = 3;
+
 // ---------------------------------------------------------------------------
 // MatchResult
 // ---------------------------------------------------------------------------
@@ -66,6 +71,16 @@ impl MatchResult {
             return None;
         }
         Self::from_u8(value as u8)
+    }
+
+    /// Derive the 1X2 result from a final scoreline.
+    pub fn from_scores(home: u32, away: u32) -> MatchResult {
+        use core::cmp::Ordering;
+        match home.cmp(&away) {
+            Ordering::Greater => MatchResult::TeamA,
+            Ordering::Less => MatchResult::TeamB,
+            Ordering::Equal => MatchResult::Draw,
+        }
     }
 }
 
@@ -131,9 +146,6 @@ pub enum DataKey {
 
     /// Vec<Address> of participants for an event  (event_id)
     EventParticipants(u64),
-
-    /// Vec<Winner> of verified winners for an event  (event_id)
-    EventWinners(u64),
 
     // ── Initialization sentinel ──────────────────────────────────────────────
     /// Set to `true` once `initialize` has been called; prevents re-init.
@@ -358,6 +370,7 @@ pub struct Match {
     /// The winning outcome; `None` until a result is submitted.
     /// Stored as `Option<u32>` (0=TeamA, 1=TeamB, 2=Draw) because Soroban's
     /// `#[contracttype]` does not support `Option<EnumType>` directly.
+    /// Derived from home_score and away_score.
     pub winning_team: Option<u32>,
 
     /// Address of the oracle / admin that submitted the result
@@ -365,6 +378,12 @@ pub struct Match {
 
     /// Unix timestamp when the result was submitted
     pub submitted_at: Option<u64>,
+
+    /// Final score for team A (home team)
+    pub home_score: Option<u32>,
+
+    /// Final score for team B (away team)
+    pub away_score: Option<u32>,
 }
 
 impl Match {
@@ -386,6 +405,8 @@ impl Match {
             winning_team: None,
             submitted_by: None,
             submitted_at: None,
+            home_score: None,
+            away_score: None,
         }
     }
 
@@ -526,6 +547,8 @@ impl Match {
 ///
 /// The `predicted_outcome` field uses a `Symbol` with one of three values:
 /// `"TEAM_A"`, `"TEAM_B"`, or `"DRAW"` (see `OUTCOME_*` constants).
+/// It is now derived from `predicted_home_score` and `predicted_away_score` at submission
+/// time for backward compatibility.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Prediction {
@@ -541,34 +564,60 @@ pub struct Prediction {
     /// Address of the user who placed this prediction
     pub predictor: Address,
 
-    /// Predicted outcome: Symbol of "TEAM_A", "TEAM_B", or "DRAW"
+    /// Predicted outcome: Symbol of "TEAM_A", "TEAM_B", or "DRAW" (derived, kept for backward compatibility)
     pub predicted_outcome: Symbol,
+
+    /// Predicted score for team A (home team)
+    pub predicted_home_score: u32,
+
+    /// Predicted score for team B (away team)
+    pub predicted_away_score: u32,
 
     /// Unix timestamp when the prediction was submitted
     pub predicted_at: u64,
 
-    /// `Some(true)` = correct, `Some(false)` = wrong, `None` = not yet graded
+    /// `Some(true)` = correct 1X2 result, `Some(false)` = wrong result, `None` = not yet graded
+    /// This tracks whether the result (1X2) was correct, separate from exact score.
     pub is_correct: Option<bool>,
+
+    /// Points earned: `None` until graded, then `Some(0|1|4)` based on accuracy
+    /// - 0 = wrong result
+    /// - 1 = correct result, wrong score
+    /// - 4 = exact score (includes result point)
+    pub points_earned: Option<u32>,
 }
 
 impl Prediction {
-    /// Create a new ungraded prediction.
+    /// Create a new ungraded prediction from a scoreline.
     pub fn new(
         prediction_id: u64,
         match_id: u64,
         event_id: u64,
         predictor: Address,
-        predicted_outcome: Symbol,
+        predicted_home_score: u32,
+        predicted_away_score: u32,
         predicted_at: u64,
+        env: &soroban_sdk::Env,
     ) -> Self {
+        let predicted_outcome = MatchResult::from_scores(predicted_home_score, predicted_away_score)
+            .to_u8();
+        let outcome_symbol = match predicted_outcome {
+            0 => Symbol::new(env, OUTCOME_TEAM_A),
+            1 => Symbol::new(env, OUTCOME_TEAM_B),
+            _ => Symbol::new(env, OUTCOME_DRAW),
+        };
+
         Self {
             prediction_id,
             match_id,
             event_id,
             predictor,
-            predicted_outcome,
+            predicted_outcome: outcome_symbol,
+            predicted_home_score,
+            predicted_away_score,
             predicted_at,
             is_correct: None,
+            points_earned: None,
         }
     }
 
@@ -587,9 +636,29 @@ impl Prediction {
         }
     }
 
-    /// Grade this prediction against the actual match result symbol.
-    pub fn grade(&mut self, actual_outcome: &Symbol) {
-        self.is_correct = Some(self.predicted_outcome == *actual_outcome);
+    /// Grade this prediction against the actual match result.
+    ///
+    /// Awards:
+    /// - 0 points if result is wrong
+    /// - 1 point if result is correct but score is wrong
+    /// - 4 points if score is exactly correct (1 for result + 3 for exact score)
+    pub fn grade(&mut self, actual_home: u32, actual_away: u32) {
+        let actual_result = MatchResult::from_scores(actual_home, actual_away);
+        let predicted_result =
+            MatchResult::from_scores(self.predicted_home_score, self.predicted_away_score);
+
+        let result_correct = predicted_result == actual_result;
+        let exact_correct =
+            self.predicted_home_score == actual_home && self.predicted_away_score == actual_away;
+
+        self.is_correct = Some(result_correct);
+        self.points_earned = Some(if exact_correct {
+            POINTS_CORRECT_RESULT + POINTS_EXACT_SCORE
+        } else if result_correct {
+            POINTS_CORRECT_RESULT
+        } else {
+            0
+        });
     }
 
     /// `true` if the prediction has been graded and was correct.
@@ -606,75 +675,94 @@ impl Prediction {
 }
 
 // ---------------------------------------------------------------------------
-// Winner
+// LeaderboardEntry
 // ---------------------------------------------------------------------------
 
-/// Records a user who correctly predicted matches in an event.
+/// Ranked leaderboard entry for an event participant.
 ///
-/// Stored inside the `Vec<Winner>` at `DataKey::EventWinners(event_id)`.
-/// Used for leaderboard ranking and reward distribution.
+/// Represents a user's performance in an event with full ranking information
+/// and deterministic tie-breaking. This replaces the binary Winner model to
+/// support top-N prize splits and flexible reward distributions.
+///
+/// Stored in Vec<LeaderboardEntry> (typically temporary, computed on-demand).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Winner {
-    /// Address of the winning predictor
+pub struct LeaderboardEntry {
+    /// Address of the participant
     pub user: Address,
 
-    /// Event they participated in
+    /// Event identifier
     pub event_id: u64,
 
-    /// How many matches they predicted correctly
-    pub total_correct: u32,
+    /// Total points earned from all predictions (0, 1, or 4 per match)
+    pub total_points: u32,
 
-    /// Total number of matches in the event (denominator for accuracy)
-    pub total_matches: u32,
+    /// Number of predictions with correct 1X2 result
+    pub correct_results: u32,
 
-    /// Unix timestamp when the user submitted their last prediction
-    /// (used as tiebreaker — earlier completion ranks higher)
-    pub completion_time: u64,
+    /// Number of predictions with exact scoreline (4-point predictions)
+    pub exact_scores: u32,
 
-    /// Unix timestamp when winner status was verified on-chain
-    pub verified_at: u64,
+    /// Total number of predictions this user submitted for the event
+    pub matches_played: u32,
+
+    /// Unix timestamp of this user's most recent prediction
+    /// (used as tiebreaker — earlier submission = higher rank)
+    pub last_prediction_time: u64,
+
+    /// 1-based rank after sorting (1 is the top-ranked participant).
+    /// Set by `get_event_leaderboard` after sorting all entries.
+    pub rank: u32,
 }
 
-impl Winner {
-    /// Construct a new verified winner record.
+impl LeaderboardEntry {
+    /// Construct a new leaderboard entry (rank will be assigned later).
     pub fn new(
         user: Address,
         event_id: u64,
-        total_correct: u32,
-        total_matches: u32,
-        completion_time: u64,
-        verified_at: u64,
+        total_points: u32,
+        correct_results: u32,
+        exact_scores: u32,
+        matches_played: u32,
+        last_prediction_time: u64,
     ) -> Self {
         Self {
             user,
             event_id,
-            total_correct,
-            total_matches,
-            completion_time,
-            verified_at,
+            total_points,
+            correct_results,
+            exact_scores,
+            matches_played,
+            last_prediction_time,
+            rank: 0, // Will be assigned during leaderboard finalization
         }
     }
 
-    /// Returns accuracy as an integer percentage in the range [0, 100].
+    /// Returns `true` if this entry outranks `other` according to the tiebreaker rules.
     ///
-    /// Returns 0 when `total_matches` is 0 to avoid division by zero.
-    pub fn get_accuracy_percentage(&self) -> u32 {
-        if self.total_matches == 0 {
-            return 0;
+    /// Sort order (all descending except last_prediction_time):
+    /// 1. Higher `total_points` wins
+    /// 2. On tie: Higher `exact_scores` wins
+    /// 3. On tie: Earlier `last_prediction_time` wins (lower timestamp = better rank)
+    /// 4. On tie: Compare addresses (deterministic final tiebreaker)
+    pub fn outranks(&self, other: &LeaderboardEntry) -> bool {
+        // Primary: higher total_points
+        if self.total_points != other.total_points {
+            return self.total_points > other.total_points;
         }
-        (self.total_correct * 100) / self.total_matches
-    }
 
-    /// Returns `true` if this winner outranks `other` for leaderboard purposes.
-    ///
-    /// Primary sort: higher `total_correct` wins.
-    /// Tiebreaker: earlier `completion_time` wins (submitted predictions sooner).
-    pub fn outranks(&self, other: &Winner) -> bool {
-        if self.total_correct != other.total_correct {
-            return self.total_correct > other.total_correct;
+        // Secondary: higher exact_scores
+        if self.exact_scores != other.exact_scores {
+            return self.exact_scores > other.exact_scores;
         }
-        // Earlier completion time is better (lower value = higher rank)
-        self.completion_time < other.completion_time
+
+        // Tertiary: earlier last_prediction_time (lower = better)
+        if self.last_prediction_time != other.last_prediction_time {
+            return self.last_prediction_time < other.last_prediction_time;
+        }
+
+        // Final tiebreaker: address comparison (deterministic)
+        // Compare the addresses directly; Soroban Address implements Ord
+        self.user < other.user
     }
 }

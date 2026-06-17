@@ -49,6 +49,15 @@ export class Match {
   @Column({ default: false })
   result_submitted: boolean;
 
+  @Column({ type: 'int', nullable: true })
+  home_score: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  away_score: number | null;
+
+  @Column({ type: 'int', default: 1 })
+  points_multiplier: number;
+
   @Column({
     type: 'enum',
     enum: WinningTeam,

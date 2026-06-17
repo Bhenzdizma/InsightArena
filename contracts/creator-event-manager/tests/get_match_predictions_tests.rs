@@ -111,9 +111,9 @@ fn test_returns_all_predictions_for_match() {
     client.join_event(&u1, &invite);
     client.join_event(&u2, &invite);
     client.join_event(&u3, &invite);
-    client.submit_prediction(&u1, &match_id, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&u2, &match_id, &Symbol::new(&env, "TEAM_B"));
-    client.submit_prediction(&u3, &match_id, &Symbol::new(&env, "DRAW"));
+    client.submit_prediction(&u1, &match_id, &2u32, &1u32); // Team A wins 2-1
+    client.submit_prediction(&u2, &match_id, &1u32, &2u32); // Team B wins 1-2
+    client.submit_prediction(&u3, &match_id, &1u32, &1u32); // Draw 1-1
 
     let predictions = client.get_match_predictions(&match_id);
     assert_eq!(predictions.len(), 3);
@@ -150,8 +150,8 @@ fn test_correct_count() {
     let u2 = Address::generate(&env);
     client.join_event(&u1, &invite);
     client.join_event(&u2, &invite);
-    client.submit_prediction(&u1, &match_id, &Symbol::new(&env, "TEAM_A"));
-    client.submit_prediction(&u2, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&u1, &match_id, &2u32, &1u32);
+    client.submit_prediction(&u2, &match_id, &2u32, &1u32);
 
     assert_eq!(client.get_match_predictions(&match_id).len(), 2);
 }

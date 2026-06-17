@@ -19,9 +19,6 @@ use soroban_sdk::{contracttype, Address, Env, Vec};
 /// * `total_predictions` — total predictions linked to all event matches.
 /// * `all_matches_resolved` — `true` only when the event has at least one
 ///   match and every stored match has a submitted result.
-/// * `winners_verified` — `true` when one or more verified winner records are
-///   stored for the event.
-/// * `winner_count` — number of verified winner records stored for the event.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EventStatistics {
@@ -30,8 +27,6 @@ pub struct EventStatistics {
     pub match_count: u32,
     pub total_predictions: u32,
     pub all_matches_resolved: bool,
-    pub winners_verified: bool,
-    pub winner_count: u32,
 }
 
 /// Public configuration snapshot for the contract.
@@ -59,9 +54,8 @@ pub fn get_event_participants(env: &Env, event_id: u64) -> Result<Vec<Address>, 
 /// Build aggregate statistics for an existing event.
 ///
 /// The function first retrieves the event to validate that `event_id` exists,
-/// then derives prediction totals from the event's match index, completion
-/// status from each stored match result, and winner status from the event's
-/// verified winners list.
+/// then derives prediction totals from the event's match index and completion
+/// status from each stored match result.
 pub fn get_event_statistics(env: &Env, event_id: u64) -> Result<EventStatistics, EventError> {
     let event = event::get_event(env, event_id)?;
     let match_ids = storage::get_event_matches(env, event_id);
@@ -80,7 +74,6 @@ pub fn get_event_statistics(env: &Env, event_id: u64) -> Result<EventStatistics,
         }
     }
 
-    let winner_count = storage::get_event_winners(env, event_id).len();
     let all_matches_resolved = event.match_count > 0
         && match_ids.len() == event.match_count
         && resolved_matches == event.match_count;
@@ -91,8 +84,6 @@ pub fn get_event_statistics(env: &Env, event_id: u64) -> Result<EventStatistics,
         match_count: event.match_count,
         total_predictions,
         all_matches_resolved,
-        winners_verified: winner_count > 0,
-        winner_count,
     })
 }
 

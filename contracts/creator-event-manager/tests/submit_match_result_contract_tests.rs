@@ -1,13 +1,11 @@
-//! #810 — Integration tests for the public `submit_match_result` oracle entry
-//! point (exercised through the contract client), covering:
-//! - AI agent can submit a result
-//! - Non-agent cannot submit
-//! - Result before match time is rejected
-//! - Duplicate submission is rejected
-//! - Invalid outcome is rejected
-//! - Predictions are graded correct/incorrect
-//! - All outcomes (TEAM_A, TEAM_B, DRAW) work
-//! - Full prediction flow (submit -> grade -> score)
+//! #966 — Integration tests for exact scoreline predictions.
+//! Covers:
+//! - Exact score predictions award 4 points (1 for result + 3 for exact)
+//! - Correct 1X2 result but wrong score awards 1 point
+//! - Wrong result awards 0 points
+//! - Scoring works for all outcomes (Team A win, Team B win, Draw)
+//! - get_user_score returns (total_points, correct_results, exact_scores, total_matches)
+//! - Predictions are graded after match result submission
 
 use creator_event_manager::storage;
 use creator_event_manager::storage_types::Match;
@@ -111,18 +109,20 @@ fn read_match(env: &Env, contract_id: &Address, match_id: u64) -> Match {
 }
 
 #[test]
-fn test_ai_agent_can_submit_result() {
+fn test_ai_agent_can_submit_result_with_scoreline() {
     let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
     let creator = Address::generate(&env);
     let (_event_id, _invite, match_id) =
         create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 1_000);
 
     env.ledger().with_mut(|l| l.timestamp += 2_000);
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &1u32);
 
     let m = read_match(&env, &contract_id, match_id);
     assert!(m.result_submitted);
-    assert_eq!(m.winning_team, Some(0));
+    assert_eq!(m.winning_team, Some(0)); // TeamA wins 2-1
+    assert_eq!(m.home_score, Some(2));
+    assert_eq!(m.away_score, Some(1));
     assert_eq!(m.submitted_by, Some(ai_agent));
 }
 
@@ -136,7 +136,7 @@ fn test_non_agent_cannot_submit() {
 
     env.ledger().with_mut(|l| l.timestamp += 2_000);
     let imposter = Address::generate(&env);
-    client.submit_match_result(&imposter, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_match_result(&imposter, &match_id, &2u32, &1u32);
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn test_result_before_match_time_rejected() {
         create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
 
     // Do NOT advance time — the match has not started yet.
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &1u32);
 }
 
 #[test]
@@ -160,21 +160,9 @@ fn test_duplicate_submission_rejected() {
         create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 1_000);
 
     env.ledger().with_mut(|l| l.timestamp += 2_000);
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &1u32);
     // Second submission must be rejected.
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "TEAM_B"));
-}
-
-#[test]
-#[should_panic(expected = "invalid_outcome")]
-fn test_invalid_outcome_rejected() {
-    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
-    let creator = Address::generate(&env);
-    let (_event_id, _invite, match_id) =
-        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 1_000);
-
-    env.ledger().with_mut(|l| l.timestamp += 2_000);
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "NOT_A_TEAM"));
+    client.submit_match_result(&ai_agent, &match_id, &3u32, &1u32);
 }
 
 #[test]
@@ -182,7 +170,7 @@ fn test_invalid_outcome_rejected() {
 fn test_unknown_match_rejected() {
     let (env, client, _contract_id, _admin, ai_agent, _xlm_token) = setup();
     env.ledger().with_mut(|l| l.timestamp += 2_000);
-    client.submit_match_result(&ai_agent, &404u64, &Symbol::new(&env, "TEAM_A"));
+    client.submit_match_result(&ai_agent, &404u64, &2u32, &1u32);
 }
 
 #[test]
@@ -196,11 +184,11 @@ fn test_predictions_marked_correct_and_incorrect() {
     let loser = Address::generate(&env);
     client.join_event(&winner, &invite);
     client.join_event(&loser, &invite);
-    let winner_pred = client.submit_prediction(&winner, &match_id, &Symbol::new(&env, "TEAM_A"));
-    let loser_pred = client.submit_prediction(&loser, &match_id, &Symbol::new(&env, "TEAM_B"));
+    let winner_pred = client.submit_prediction(&winner, &match_id, &2u32, &1u32); // Exact
+    let loser_pred = client.submit_prediction(&loser, &match_id, &0u32, &1u32); // Team B wins (wrong)
 
     env.ledger().with_mut(|l| l.timestamp += 20_000);
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &1u32); // Team A wins
 
     assert_eq!(client.get_prediction(&winner_pred).is_correct, Some(true));
     assert_eq!(client.get_prediction(&loser_pred).is_correct, Some(false));
@@ -219,13 +207,13 @@ fn test_all_outcomes_work() {
         create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 1_000);
 
     env.ledger().with_mut(|l| l.timestamp += 2_000);
-    client.submit_match_result(&ai_agent, &m_a, &Symbol::new(&env, "TEAM_A"));
-    client.submit_match_result(&ai_agent, &m_b, &Symbol::new(&env, "TEAM_B"));
-    client.submit_match_result(&ai_agent, &m_d, &Symbol::new(&env, "DRAW"));
+    client.submit_match_result(&ai_agent, &m_a, &2u32, &1u32); // TeamA wins
+    client.submit_match_result(&ai_agent, &m_b, &1u32, &2u32); // TeamB wins
+    client.submit_match_result(&ai_agent, &m_d, &1u32, &1u32); // Draw
 
-    assert_eq!(read_match(&env, &contract_id, m_a).winning_team, Some(0));
-    assert_eq!(read_match(&env, &contract_id, m_b).winning_team, Some(1));
-    assert_eq!(read_match(&env, &contract_id, m_d).winning_team, Some(2));
+    assert_eq!(read_match(&env, &contract_id, m_a).winning_team, Some(0)); // TeamA
+    assert_eq!(read_match(&env, &contract_id, m_b).winning_team, Some(1)); // TeamB
+    assert_eq!(read_match(&env, &contract_id, m_d).winning_team, Some(2)); // Draw
 }
 
 #[test]
@@ -239,20 +227,221 @@ fn test_full_prediction_flow_with_scoring() {
     let bob = Address::generate(&env);
     client.join_event(&alice, &invite);
     client.join_event(&bob, &invite);
-    client.submit_prediction(&alice, &match_id, &Symbol::new(&env, "DRAW"));
-    client.submit_prediction(&bob, &match_id, &Symbol::new(&env, "TEAM_A"));
+    client.submit_prediction(&alice, &match_id, &1u32, &1u32);
+    client.submit_prediction(&bob, &match_id, &2u32, &0u32);
 
     env.ledger().with_mut(|l| l.timestamp += 20_000);
-    client.submit_match_result(&ai_agent, &match_id, &Symbol::new(&env, "DRAW"));
+    client.submit_match_result(&ai_agent, &match_id, &1u32, &1u32); // Draw
 
-    // Alice predicted the winning outcome; Bob did not.
-    assert_eq!(client.get_user_score(&alice, &event_id), (1, 1));
-    assert_eq!(client.get_user_score(&bob, &event_id), (0, 1));
+    // Alice predicted the exact score (1-1 Draw); Bob did not.
+    let (alice_points, alice_correct, alice_exact, alice_total) =
+        client.get_user_score(&alice, &event_id);
+    assert_eq!(alice_points, 4); // 1 for result + 3 for exact score
+    assert_eq!(alice_correct, 1);
+    assert_eq!(alice_exact, 1);
+    assert_eq!(alice_total, 1);
+
+    let (bob_points, bob_correct, bob_exact, bob_total) =
+        client.get_user_score(&bob, &event_id);
+    assert_eq!(bob_points, 0); // Wrong result (predicted 2-0, got 1-1)
+    assert_eq!(bob_correct, 0);
+    assert_eq!(bob_exact, 0);
+    assert_eq!(bob_total, 1);
 
     // And the match is fully resolved.
     let m = read_match(&env, &contract_id, match_id);
     assert!(m.result_submitted);
-    assert_eq!(m.winning_team, Some(2));
+    assert_eq!(m.winning_team, Some(2)); // Draw
+    assert_eq!(m.home_score, Some(1));
+    assert_eq!(m.away_score, Some(1));
+}
+
+
+// ============================================================================
+// New tests for exact scoreline predictions (#966)
+// ============================================================================
+
+#[test]
+fn test_grading_exact_score_awards_4_points() {
+    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let (_event_id, invite, match_id) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+    let pred_id = client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
+
+    env.ledger().with_mut(|l| l.timestamp += 20_000);
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &1u32); // Exact match
+
+    let prediction = client.get_prediction(&pred_id);
+    assert_eq!(prediction.points_earned, Some(4)); // 1 for result + 3 for exact score
+    assert_eq!(prediction.is_correct, Some(true));
+}
+
+#[test]
+fn test_grading_correct_result_wrong_score_awards_1_point() {
+    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let (_event_id, invite, match_id) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+    let pred_id = client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
+
+    env.ledger().with_mut(|l| l.timestamp += 20_000);
+    client.submit_match_result(&ai_agent, &match_id, &3u32, &1u32); // Different score, same result
+
+    let prediction = client.get_prediction(&pred_id);
+    assert_eq!(prediction.points_earned, Some(1)); // Only result is correct
+    assert_eq!(prediction.is_correct, Some(true));
+}
+
+#[test]
+fn test_grading_wrong_result_awards_0_points() {
+    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let (_event_id, invite, match_id) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+    let pred_id = client.submit_prediction(&predictor, &match_id, &1u32, &0u32); // Team A wins
+
+    env.ledger().with_mut(|l| l.timestamp += 20_000);
+    client.submit_match_result(&ai_agent, &match_id, &0u32, &1u32); // Team B wins
+
+    let prediction = client.get_prediction(&pred_id);
+    assert_eq!(prediction.points_earned, Some(0)); // Wrong result
+    assert_eq!(prediction.is_correct, Some(false));
+}
+
+#[test]
+fn test_grading_draw_exact_score() {
+    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let (_event_id, invite, match_id) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+    let pred_id = client.submit_prediction(&predictor, &match_id, &2u32, &2u32);
+
+    env.ledger().with_mut(|l| l.timestamp += 20_000);
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &2u32);
+
+    let prediction = client.get_prediction(&pred_id);
+    assert_eq!(prediction.points_earned, Some(4)); // Exact draw
+    assert_eq!(prediction.is_correct, Some(true));
+}
+
+#[test]
+fn test_grading_draw_wrong_score() {
+    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let (_event_id, invite, match_id) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+    let pred_id = client.submit_prediction(&predictor, &match_id, &1u32, &1u32);
+
+    env.ledger().with_mut(|l| l.timestamp += 20_000);
+    client.submit_match_result(&ai_agent, &match_id, &2u32, &2u32); // Draw but different score
+
+    let prediction = client.get_prediction(&pred_id);
+    assert_eq!(prediction.points_earned, Some(1)); // Correct result (draw), wrong score
+    assert_eq!(prediction.is_correct, Some(true));
+}
+
+#[test]
+fn test_get_user_score_aggregates_points_across_multiple_matches() {
+    let (env, client, contract_id, _admin, ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+
+    // Create event with 3 matches
+    let (event_id, invite, match1) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    // Create and add 2 more matches to the same event
+    let match2 = env.as_contract(&contract_id, || {
+        let match_id = storage::next_match_id(&env);
+        let match_record = creator_event_manager::storage_types::Match::new(
+            match_id,
+            event_id,
+            String::from_str(&env, "Team C"),
+            String::from_str(&env, "Team D"),
+            env.ledger().timestamp() + 10_000,
+        );
+        storage::set_match(&env, match_id, &match_record);
+        storage::add_event_match(&env, event_id, match_id);
+
+        let mut event = storage::get_event(&env, event_id).unwrap();
+        event.add_match();
+        storage::set_event(&env, event_id, &event);
+        match_id
+    });
+
+    let match3 = env.as_contract(&contract_id, || {
+        let match_id = storage::next_match_id(&env);
+        let match_record = creator_event_manager::storage_types::Match::new(
+            match_id,
+            event_id,
+            String::from_str(&env, "Team E"),
+            String::from_str(&env, "Team F"),
+            env.ledger().timestamp() + 10_000,
+        );
+        storage::set_match(&env, match_id, &match_record);
+        storage::add_event_match(&env, event_id, match_id);
+
+        let mut event = storage::get_event(&env, event_id).unwrap();
+        event.add_match();
+        storage::set_event(&env, event_id, &event);
+        match_id
+    });
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+
+    // Predictions for all 3 matches
+    let _pred1 = client.submit_prediction(&predictor, &match1, &2u32, &1u32); // Exact
+    let _pred2 = client.submit_prediction(&predictor, &match2, &1u32, &0u32); // Result only
+    let _pred3 = client.submit_prediction(&predictor, &match3, &0u32, &1u32); // Wrong
+
+    env.ledger().with_mut(|l| l.timestamp += 20_000);
+
+    // Submit results for all 3 matches
+    client.submit_match_result(&ai_agent, &match1, &2u32, &1u32); // Exact: 4 points
+    client.submit_match_result(&ai_agent, &match2, &2u32, &0u32); // Correct result: 1 point
+    client.submit_match_result(&ai_agent, &match3, &1u32, &0u32); // Wrong: 0 points
+
+    let (total_points, correct_results, exact_scores, total_matches) =
+        client.get_user_score(&predictor, &event_id);
+
+    assert_eq!(total_points, 5); // 4 + 1 + 0
+    assert_eq!(correct_results, 2); // Matches 1 and 2
+    assert_eq!(exact_scores, 1); // Only match 1
+    assert_eq!(total_matches, 3);
+}
+
+#[test]
+fn test_submit_prediction_stores_scoreline() {
+    let (env, client, contract_id, _admin, _ai_agent, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let (_event_id, invite, match_id) =
+        create_event_with_match(&env, &contract_id, &client, &creator, &xlm_token, 10_000);
+
+    let predictor = Address::generate(&env);
+    client.join_event(&predictor, &invite);
+    let pred_id = client.submit_prediction(&predictor, &match_id, &2u32, &1u32);
+
+    let prediction = client.get_prediction(&pred_id);
+    assert_eq!(prediction.predicted_home_score, 2);
+    assert_eq!(prediction.predicted_away_score, 1);
+    assert_eq!(prediction.points_earned, None); // Not yet graded
+    assert_eq!(prediction.is_correct, None); // Not yet graded
 }
 
 

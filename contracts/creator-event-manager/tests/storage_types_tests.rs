@@ -2,7 +2,7 @@
 // These live in tests/ so they import via the crate name.
 
 use creator_event_manager::storage_types::{
-    Event, Match, MatchResult, Prediction, Winner, OUTCOME_DRAW, OUTCOME_TEAM_A, OUTCOME_TEAM_B,
+    Event, Match, MatchResult, Prediction, OUTCOME_DRAW, OUTCOME_TEAM_A, OUTCOME_TEAM_B,
 };
 use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol};
 
@@ -366,24 +366,27 @@ fn test_match_validation_inconsistent_result() {
 fn test_prediction_creation() {
     let env = Env::default();
     let predictor = Address::generate(&env);
-    let outcome = Symbol::new(&env, OUTCOME_TEAM_A);
 
     let pred = Prediction::new(
         1u64,
         5u64,
         10u64,
         predictor.clone(),
-        outcome.clone(),
+        2u32,
+        1u32,
         1_640_995_200u64,
+        &env,
     );
 
     assert_eq!(pred.prediction_id, 1);
     assert_eq!(pred.match_id, 5);
     assert_eq!(pred.event_id, 10);
     assert_eq!(pred.predictor, predictor);
-    assert_eq!(pred.predicted_outcome, outcome);
+    assert_eq!(pred.predicted_home_score, 2);
+    assert_eq!(pred.predicted_away_score, 1);
     assert_eq!(pred.predicted_at, 1_640_995_200);
     assert!(pred.is_correct.is_none());
+    assert!(pred.points_earned.is_none());
 }
 
 #[test]
@@ -410,12 +413,12 @@ fn test_prediction_validate_outcome_invalid() {
 fn test_prediction_grading_correct() {
     let env = Env::default();
     let predictor = Address::generate(&env);
-    let outcome = Symbol::new(&env, OUTCOME_TEAM_A);
 
-    let mut pred = Prediction::new(1, 5, 10, predictor, outcome.clone(), 1_640_995_200);
-    pred.grade(&outcome);
+    let mut pred = Prediction::new(1, 5, 10, predictor, 2u32, 1u32, 1_640_995_200, &env);
+    pred.grade(2u32, 1u32); // Exact match
 
     assert_eq!(pred.is_correct, Some(true));
+    assert_eq!(pred.points_earned, Some(4)); // 1 + 3 for exact
     assert!(pred.is_winner());
 }
 
@@ -423,13 +426,12 @@ fn test_prediction_grading_correct() {
 fn test_prediction_grading_wrong() {
     let env = Env::default();
     let predictor = Address::generate(&env);
-    let predicted = Symbol::new(&env, OUTCOME_TEAM_A);
-    let actual = Symbol::new(&env, OUTCOME_TEAM_B);
 
-    let mut pred = Prediction::new(1, 5, 10, predictor, predicted, 1_640_995_200);
-    pred.grade(&actual);
+    let mut pred = Prediction::new(1, 5, 10, predictor, 2u32, 1u32, 1_640_995_200, &env);
+    pred.grade(0u32, 1u32); // Wrong result (predict TeamA win, got TeamB)
 
     assert_eq!(pred.is_correct, Some(false));
+    assert_eq!(pred.points_earned, Some(0));
     assert!(!pred.is_winner());
 }
 
@@ -437,12 +439,12 @@ fn test_prediction_grading_wrong() {
 fn test_prediction_grading_draw() {
     let env = Env::default();
     let predictor = Address::generate(&env);
-    let draw = Symbol::new(&env, OUTCOME_DRAW);
 
-    let mut pred = Prediction::new(1, 5, 10, predictor, draw.clone(), 1_640_995_200);
-    pred.grade(&draw);
+    let mut pred = Prediction::new(1, 5, 10, predictor, 1u32, 1u32, 1_640_995_200, &env);
+    pred.grade(1u32, 1u32);
 
     assert_eq!(pred.is_correct, Some(true));
+    assert_eq!(pred.points_earned, Some(4)); // Exact draw
     assert!(pred.is_winner());
 }
 
@@ -450,7 +452,6 @@ fn test_prediction_grading_draw() {
 fn test_prediction_is_before_match_time() {
     let env = Env::default();
     let predictor = Address::generate(&env);
-    let outcome = Symbol::new(&env, OUTCOME_TEAM_A);
     let match_time = 1_640_995_200u64;
 
     // Predicted 1 hour before match
@@ -459,17 +460,37 @@ fn test_prediction_is_before_match_time() {
         5,
         10,
         predictor.clone(),
-        outcome.clone(),
+        2u32,
+        1u32,
         match_time - 3600,
+        &env,
     );
     assert!(pred_before.is_before_match_time(match_time));
 
     // Predicted exactly at match time — not before
-    let pred_at = Prediction::new(2, 5, 10, predictor.clone(), outcome.clone(), match_time);
+    let pred_at = Prediction::new(
+        2,
+        5,
+        10,
+        predictor.clone(),
+        2u32,
+        1u32,
+        match_time,
+        &env,
+    );
     assert!(!pred_at.is_before_match_time(match_time));
 
     // Predicted after match time
-    let pred_after = Prediction::new(3, 5, 10, predictor, outcome, match_time + 1);
+    let pred_after = Prediction::new(
+        3,
+        5,
+        10,
+        predictor,
+        2u32,
+        1u32,
+        match_time + 1,
+        &env,
+    );
     assert!(!pred_after.is_before_match_time(match_time));
 }
 
@@ -477,102 +498,7 @@ fn test_prediction_is_before_match_time() {
 fn test_prediction_ungraded_is_not_winner() {
     let env = Env::default();
     let predictor = Address::generate(&env);
-    let outcome = Symbol::new(&env, OUTCOME_TEAM_A);
 
-    let pred = Prediction::new(1, 5, 10, predictor, outcome, 1_640_995_200);
+    let pred = Prediction::new(1, 5, 10, predictor, 2u32, 1u32, 1_640_995_200, &env);
     assert!(!pred.is_winner()); // None → not a winner
-}
-
-// ---------------------------------------------------------------------------
-// Winner tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_winner_creation() {
-    let env = Env::default();
-    let user = Address::generate(&env);
-
-    let winner = Winner::new(user.clone(), 42, 5, 5, 1_640_995_100, 1_640_995_200);
-    assert_eq!(winner.user, user);
-    assert_eq!(winner.event_id, 42);
-    assert_eq!(winner.total_correct, 5);
-    assert_eq!(winner.total_matches, 5);
-    assert_eq!(winner.completion_time, 1_640_995_100);
-    assert_eq!(winner.verified_at, 1_640_995_200);
-}
-
-#[test]
-fn test_winner_accuracy_percentage_perfect() {
-    let env = Env::default();
-    let user = Address::generate(&env);
-    let winner = Winner::new(user, 1, 5, 5, 0, 0);
-    assert_eq!(winner.get_accuracy_percentage(), 100);
-}
-
-#[test]
-fn test_winner_accuracy_percentage_partial() {
-    let env = Env::default();
-    let user = Address::generate(&env);
-    // 3 correct out of 5 = 60%
-    let winner = Winner::new(user, 1, 3, 5, 0, 0);
-    assert_eq!(winner.get_accuracy_percentage(), 60);
-}
-
-#[test]
-fn test_winner_accuracy_percentage_zero_matches() {
-    let env = Env::default();
-    let user = Address::generate(&env);
-    // total_matches = 0 → should not panic, returns 0
-    let winner = Winner::new(user, 1, 0, 0, 0, 0);
-    assert_eq!(winner.get_accuracy_percentage(), 0);
-}
-
-#[test]
-fn test_winner_accuracy_percentage_zero_correct() {
-    let env = Env::default();
-    let user = Address::generate(&env);
-    let winner = Winner::new(user, 1, 0, 5, 0, 0);
-    assert_eq!(winner.get_accuracy_percentage(), 0);
-}
-
-#[test]
-fn test_winner_outranks_by_correct_count() {
-    let env = Env::default();
-    let u1 = Address::generate(&env);
-    let u2 = Address::generate(&env);
-
-    // w1 has more correct predictions
-    let w1 = Winner::new(u1, 1, 5, 5, 1000, 0);
-    let w2 = Winner::new(u2, 1, 3, 5, 500, 0);
-
-    assert!(w1.outranks(&w2));
-    assert!(!w2.outranks(&w1));
-}
-
-#[test]
-fn test_winner_outranks_tiebreak_by_completion_time() {
-    let env = Env::default();
-    let u1 = Address::generate(&env);
-    let u2 = Address::generate(&env);
-
-    // Same correct count; w1 finished earlier → w1 outranks w2
-    let w1 = Winner::new(u1, 1, 5, 5, 500, 0); // earlier completion
-    let w2 = Winner::new(u2, 1, 5, 5, 1000, 0); // later completion
-
-    assert!(w1.outranks(&w2));
-    assert!(!w2.outranks(&w1));
-}
-
-#[test]
-fn test_winner_does_not_outrank_equal() {
-    let env = Env::default();
-    let u1 = Address::generate(&env);
-    let u2 = Address::generate(&env);
-
-    // Identical stats — neither outranks the other
-    let w1 = Winner::new(u1, 1, 5, 5, 500, 0);
-    let w2 = Winner::new(u2, 1, 5, 5, 500, 0);
-
-    assert!(!w1.outranks(&w2));
-    assert!(!w2.outranks(&w1));
 }

@@ -5,13 +5,29 @@ import { useRouter } from "next/navigation";
 import { Check, Copy, Share2, Twitter, ChevronRight, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/component/ui/button";
 import { useWallet } from "@/context/WalletContext";
+import { useCreatorEvents } from "@/hooks/useCreatorEvents";
 
 type Step = 1 | 2 | 3;
+
+interface RewardDraft {
+  rank1: number;
+  rank2: number;
+  rank3: number;
+  rank4: number;
+  rank5: number;
+}
 
 interface EventDraft {
   title: string;
   description: string;
   maxParticipants: number;
+  startTime: string;
+  endTime: string;
+  prizePool: number;
+  rewardDistribution: RewardDraft;
+  entryFee: number;
+  category: string;
+  bannerUrl: string;
 }
 
 const DRAFT_KEY = "creator_event_draft";
@@ -20,11 +36,36 @@ const MAX_DESCRIPTION = 1000;
 const MIN_PARTICIPANTS = 2;
 const MAX_PARTICIPANTS = 1000;
 
+function defaultReward(): RewardDraft {
+  return { rank1: 0, rank2: 0, rank3: 0, rank4: 0, rank5: 0 };
+}
+
+function defaultDraft(): EventDraft {
+  return {
+    title: "",
+    description: "",
+    maxParticipants: 100,
+    startTime: "",
+    endTime: "",
+    prizePool: 0,
+    rewardDistribution: defaultReward(),
+    entryFee: 0,
+    category: "",
+    bannerUrl: "",
+  };
+}
+
 function loadDraft(): EventDraft | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
-    return raw ? (JSON.parse(raw) as EventDraft) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      ...defaultDraft(),
+      ...parsed,
+      rewardDistribution: { ...defaultReward(), ...parsed.rewardDistribution },
+    };
   } catch {
     return null;
   }
@@ -43,12 +84,25 @@ function clearDraft() {
 export default function CreateEventForm() {
   const router = useRouter();
   const { address } = useWallet();
+  const { createEvent } = useCreatorEvents();
 
   const [step, setStep] = useState<Step>(1);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [maxParticipants, setMaxParticipants] = useState(100);
-  const [errors, setErrors] = useState<{ title?: string; description?: string; maxParticipants?: string; form?: string }>({});
+
+  const [draft, setDraft] = useState<EventDraft>(defaultDraft());
+  const {
+    title,
+    description,
+    maxParticipants,
+    startTime,
+    endTime,
+    prizePool,
+    rewardDistribution,
+    entryFee,
+    category,
+    bannerUrl,
+  } = draft;
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [creationFee, setCreationFee] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
@@ -56,13 +110,13 @@ export default function CreateEventForm() {
   const [createdEventId, setCreatedEventId] = useState("");
   const [copied, setCopied] = useState(false);
 
+  function patch(partial: Partial<EventDraft>) {
+    setDraft((prev) => ({ ...prev, ...partial }));
+  }
+
   useEffect(() => {
-    const draft = loadDraft();
-    if (draft) {
-      setTitle(draft.title || "");
-      setDescription(draft.description || "");
-      setMaxParticipants(draft.maxParticipants || 100);
-    }
+    const saved = loadDraft();
+    if (saved) setDraft(saved);
   }, []);
 
   useEffect(() => {
@@ -72,7 +126,7 @@ export default function CreateEventForm() {
   }, [step, creationFee]);
 
   function validateStep1(): boolean {
-    const errs: typeof errors = {};
+    const errs: Record<string, string> = {};
     if (!title.trim()) errs.title = "Event title is required.";
     else if (title.length > MAX_TITLE)
       errs.title = `Title must be ${MAX_TITLE} characters or fewer.`;
@@ -84,12 +138,26 @@ export default function CreateEventForm() {
       maxParticipants > MAX_PARTICIPANTS
     )
       errs.maxParticipants = `Participants must be between ${MIN_PARTICIPANTS} and ${MAX_PARTICIPANTS}.`;
+    if (prizePool < 0)
+      errs.prizePool = "Prize pool cannot be negative.";
+    if (entryFee < 0)
+      errs.entryFee = "Entry fee cannot be negative.";
+    if (prizePool > 0) {
+      const sum =
+        rewardDistribution.rank1 +
+        rewardDistribution.rank2 +
+        rewardDistribution.rank3 +
+        rewardDistribution.rank4 +
+        rewardDistribution.rank5;
+      if (sum !== 100)
+        errs.rewardDistribution = `Reward distribution must sum to 100% (currently ${sum}%).`;
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
   function handleSaveDraft() {
-    saveDraft({ title, description, maxParticipants });
+    saveDraft(draft);
     alert("Draft saved.");
   }
 
@@ -99,19 +167,34 @@ export default function CreateEventForm() {
     }
   }
 
+  function setReward(rank: keyof RewardDraft, value: number) {
+    patch({
+      rewardDistribution: { ...rewardDistribution, [rank]: Math.max(0, Math.min(100, value)) },
+    });
+  }
+
   async function handleCreateEvent() {
     setTxError(null);
     setIsSigning(true);
     try {
-      await new Promise((r) => setTimeout(r, 1800));
-      const code = Math.random().toString(36).toUpperCase().slice(2, 10);
-      const eventId = `evt-${Date.now()}`;
+      const { eventId, inviteCode: code } = await createEvent({
+        title,
+        description,
+        maxParticipants,
+        startTime,
+        endTime,
+        prizePool,
+        rewardDistribution,
+        entryFee,
+        category,
+        bannerUrl,
+      });
       setInviteCode(code);
       setCreatedEventId(eventId);
       clearDraft();
       setStep(3);
-    } catch {
-      setTxError("Transaction failed. Please try again.");
+    } catch (err) {
+      setTxError(err instanceof Error ? err.message : "Transaction failed. Please try again.");
     } finally {
       setIsSigning(false);
     }
@@ -173,7 +256,7 @@ export default function CreateEventForm() {
               id="event-title"
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => patch({ title: e.target.value })}
               maxLength={MAX_TITLE}
               placeholder="e.g. Apollo Tournament"
               className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
@@ -199,7 +282,7 @@ export default function CreateEventForm() {
             <textarea
               id="event-description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => patch({ description: e.target.value })}
               maxLength={MAX_DESCRIPTION}
               rows={4}
               placeholder="Describe your event…"
@@ -215,27 +298,178 @@ export default function CreateEventForm() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="max-participants"
-              className="block text-sm font-medium text-slate-300"
-            >
-              Max Participants
-            </label>
-            <input
-              id="max-participants"
-              type="number"
-              value={maxParticipants}
-              onChange={(e) =>
-                setMaxParticipants(parseInt(e.target.value, 10) || MIN_PARTICIPANTS)
-              }
-              min={MIN_PARTICIPANTS}
-              max={MAX_PARTICIPANTS}
-              className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-            />
-            {errors.maxParticipants && (
-              <p className="text-xs text-rose-400">{errors.maxParticipants}</p>
-            )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label
+                htmlFor="start-time"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Event Starts At
+              </label>
+              <input
+                id="start-time"
+                type="datetime-local"
+                value={startTime}
+                onChange={(e) => patch({ startTime: e.target.value })}
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+            </div>
+            <div className="space-y-2">
+              <label
+                htmlFor="end-time"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Event Ends At
+              </label>
+              <input
+                id="end-time"
+                type="datetime-local"
+                value={endTime}
+                onChange={(e) => patch({ endTime: e.target.value })}
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <label
+                htmlFor="max-participants"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Max Participants
+              </label>
+              <input
+                id="max-participants"
+                type="number"
+                value={maxParticipants}
+                onChange={(e) =>
+                  patch({ maxParticipants: parseInt(e.target.value, 10) || MIN_PARTICIPANTS })
+                }
+                min={MIN_PARTICIPANTS}
+                max={MAX_PARTICIPANTS}
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+              {errors.maxParticipants && (
+                <p className="text-xs text-rose-400">{errors.maxParticipants}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label
+                htmlFor="prize-pool"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Prize Pool
+              </label>
+              <input
+                id="prize-pool"
+                type="number"
+                value={prizePool}
+                onChange={(e) => patch({ prizePool: Math.max(0, parseFloat(e.target.value) || 0) })}
+                min={0}
+                step="0.01"
+                placeholder="0.00"
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+              {errors.prizePool && (
+                <p className="text-xs text-rose-400">{errors.prizePool}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label
+                htmlFor="entry-fee"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Entry Fee
+              </label>
+              <input
+                id="entry-fee"
+                type="number"
+                value={entryFee}
+                onChange={(e) => patch({ entryFee: Math.max(0, parseFloat(e.target.value) || 0) })}
+                min={0}
+                step="0.01"
+                placeholder="0.00"
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+              {errors.entryFee && (
+                <p className="text-xs text-rose-400">{errors.entryFee}</p>
+              )}
+            </div>
+          </div>
+
+          {prizePool > 0 && (
+            <div className="space-y-3 rounded-2xl border border-amber-400/20 bg-amber-400/5 p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-amber-300/70">
+                Reward Distribution — Top 5
+              </p>
+              {errors.rewardDistribution && (
+                <p className="text-xs text-rose-400">{errors.rewardDistribution}</p>
+              )}
+              <div className="grid grid-cols-5 gap-3">
+                {([
+                  { key: "rank1" as const, label: "#1" },
+                  { key: "rank2" as const, label: "#2" },
+                  { key: "rank3" as const, label: "#3" },
+                  { key: "rank4" as const, label: "#4" },
+                  { key: "rank5" as const, label: "#5" },
+                ]).map(({ key, label }) => (
+                  <div key={key} className="space-y-1">
+                    <label className="block text-center text-xs text-slate-400">
+                      {label}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        value={rewardDistribution[key]}
+                        onChange={(e) => setReward(key, parseInt(e.target.value, 10) || 0)}
+                        min={0}
+                        max={100}
+                        className="w-full rounded-xl border border-white/10 bg-slate-950/90 px-3 py-2 text-center text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                      />
+                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">
+                        %
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label
+                htmlFor="category"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Category
+              </label>
+              <input
+                id="category"
+                type="text"
+                value={category}
+                onChange={(e) => patch({ category: e.target.value })}
+                placeholder="e.g. Gaming, Sports, Entertainment"
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+            </div>
+            <div className="space-y-2">
+              <label
+                htmlFor="banner-url"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Banner URL <span className="text-slate-500">(optional)</span>
+              </label>
+              <input
+                id="banner-url"
+                type="url"
+                value={bannerUrl}
+                onChange={(e) => patch({ bannerUrl: e.target.value })}
+                placeholder="https://..."
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+            </div>
           </div>
 
           <div className="flex items-center justify-between pt-2">
@@ -278,6 +512,50 @@ export default function CreateEventForm() {
                 <span className="text-slate-500">Max Participants</span>
                 <span className="font-medium text-white">{maxParticipants}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Starts</span>
+                <span className="font-medium text-white">
+                  {startTime ? new Date(startTime).toLocaleString() : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Ends</span>
+                <span className="font-medium text-white">
+                  {endTime ? new Date(endTime).toLocaleString() : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Prize Pool</span>
+                <span className="font-medium text-white">
+                  {prizePool > 0 ? `${prizePool} XLM` : "None"}
+                </span>
+              </div>
+              {prizePool > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Reward Split (Top 5)</span>
+                  <span className="font-medium text-white">
+                    {rewardDistribution.rank1}% / {rewardDistribution.rank2}% / {rewardDistribution.rank3}% / {rewardDistribution.rank4}% / {rewardDistribution.rank5}%
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500">Entry Fee</span>
+                <span className="font-medium text-white">
+                  {entryFee > 0 ? `${entryFee} XLM` : "Free"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Category</span>
+                <span className="font-medium text-white">{category || "—"}</span>
+              </div>
+              {bannerUrl && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Banner</span>
+                  <span className="max-w-[200px] truncate font-medium text-white">
+                    {bannerUrl}
+                  </span>
+                </div>
+              )}
               {description && (
                 <div className="pt-1">
                   <span className="text-slate-500">Description</span>

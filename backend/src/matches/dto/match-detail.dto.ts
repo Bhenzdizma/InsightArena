@@ -53,6 +53,15 @@ export class MatchDetailDto {
   @ApiPropertyOptional({ nullable: true })
   winning_team: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  home_score: number | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  away_score: number | null;
+
+  @ApiProperty()
+  points_multiplier: number;
+
   @ApiProperty()
   total_predictions: number;
 

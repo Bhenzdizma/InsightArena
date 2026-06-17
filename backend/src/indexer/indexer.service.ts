@@ -399,6 +399,7 @@ export class IndexerService implements OnModuleInit {
           team_a: this.readStr(base, 'team_a'),
           team_b: this.readStr(base, 'team_b'),
           match_time: this.readNum(base, 'match_time'),
+          points_multiplier: this.readNum(base, 'points_multiplier'),
         };
       case 'UserJoinedEvent':
         return {
@@ -422,6 +423,8 @@ export class IndexerService implements OnModuleInit {
           winning_team: this.readNum(base, 'winning_team'),
           submitted_by: this.readStr(base, 'submitted_by'),
           submitted_at: this.readNum(base, 'submitted_at'),
+          home_score: this.readNum(base, 'home_score'),
+          away_score: this.readNum(base, 'away_score'),
         };
       case 'WinnersVerified':
         return {
@@ -631,6 +634,12 @@ export class IndexerService implements OnModuleInit {
       return;
     }
 
+    let pointsMultiplier =
+      data.points_multiplier !== undefined ? Number(data.points_multiplier) : 1;
+    if (pointsMultiplier < 1 || pointsMultiplier > 3 || isNaN(pointsMultiplier)) {
+      pointsMultiplier = 1;
+    }
+
     const match = this.matchRepository.create({
       on_chain_match_id: onChainMatchId,
       event,
@@ -639,10 +648,13 @@ export class IndexerService implements OnModuleInit {
       match_time: data.match_time
         ? new Date(Number(data.match_time) * 1000)
         : new Date(),
+      points_multiplier: pointsMultiplier,
       result_submitted: false,
       winning_team: null,
       submitted_by: null,
       submitted_at: null,
+      home_score: null,
+      away_score: null,
     });
 
     await this.matchRepository.save(match);
@@ -798,6 +810,10 @@ export class IndexerService implements OnModuleInit {
     match.submitted_at = data.submitted_at
       ? new Date(Number(data.submitted_at) * 1000)
       : new Date();
+    match.home_score =
+      data.home_score !== undefined ? Number(data.home_score) : null;
+    match.away_score =
+      data.away_score !== undefined ? Number(data.away_score) : null;
 
     await this.matchRepository.save(match);
 
