@@ -4,7 +4,7 @@ use creator_event_manager::storage_types::{Match, MatchResult, Prediction};
 use creator_event_manager::CreatorEventManagerContractClient;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::token::StellarAssetClient;
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
 const FEE: i128 = 1_000_000;
 
@@ -115,6 +115,8 @@ fn test_get_event_participants_returns_all_participants() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
     client.join_event(&user_one, &invite_code);
     client.join_event(&user_two, &invite_code);
@@ -143,6 +145,8 @@ fn test_get_event_participants_empty_for_new_event() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let participants = client.get_event_participants(&event_id);
@@ -166,6 +170,8 @@ fn test_get_event_participants_updates_as_participants_join() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let initial_participants = client.get_event_participants(&event_id);
@@ -207,6 +213,8 @@ fn test_event_statistics_are_accurate() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
     client.join_event(&user_one, &invite_code);
     client.join_event(&user_two, &invite_code);
@@ -243,6 +251,8 @@ fn test_event_statistics_completion_status() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     env.as_contract(&contract_id, || {
@@ -303,6 +313,8 @@ fn test_get_platform_statistics_all_statistics_accurate() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
     client.join_event(&user1, &invite_code_1);
     client.join_event(&user2, &invite_code_1);
@@ -324,6 +336,8 @@ fn test_get_platform_statistics_all_statistics_accurate() {
         &5u32,
         &start_time2,
         &end_time2,
+        &0i128,
+        &Vec::new(&env),
     );
     client.join_event(&user1, &invite_code_2);
 
@@ -363,6 +377,8 @@ fn test_get_platform_statistics_counters_increment_correctly() {
         &5u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let after_event = client.get_platform_statistics();
@@ -407,6 +423,8 @@ fn test_get_platform_statistics_unique_participants_calculated() {
         &5u32,
         &start_time1,
         &end_time1,
+        &0i128,
+        &Vec::new(&env),
     );
     client.join_event(&user1, &invite_code_1);
     client.join_event(&user2, &invite_code_1);
@@ -422,6 +440,8 @@ fn test_get_platform_statistics_unique_participants_calculated() {
         &5u32,
         &start_time2,
         &end_time2,
+        &0i128,
+        &Vec::new(&env),
     );
     client.join_event(&user1, &invite_code_2);
 
@@ -459,6 +479,8 @@ fn test_get_platform_statistics_fees_accumulated() {
         &5u32,
         &start_time1,
         &end_time1,
+        &0i128,
+        &Vec::new(&env),
     );
 
     fund(&env, &xlm_token, &creator2, FEE);
@@ -471,6 +493,8 @@ fn test_get_platform_statistics_fees_accumulated() {
         &5u32,
         &start_time2,
         &end_time2,
+        &0i128,
+        &Vec::new(&env),
     );
 
     fund(&env, &xlm_token, &creator3, FEE);
@@ -483,6 +507,8 @@ fn test_get_platform_statistics_fees_accumulated() {
         &5u32,
         &start_time3,
         &end_time3,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let stats = client.get_platform_statistics();

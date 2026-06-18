@@ -126,6 +126,8 @@ describe('CreatorEventsController', () => {
         winnerCount: 0,
         averagePredictionsPerUser: 4,
         completionRate: 60,
+        prizePool: '0',
+        totalEntryFeesCollected: '0',
       };
 
       service.getEventStats.mockResolvedValue(mockStats);

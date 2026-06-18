@@ -80,6 +80,13 @@ export class CreatorEvent {
   @ApiProperty({ description: 'Entry fee in stroops' })
   entry_fee: string;
 
+  @Column({ type: 'bigint', default: '0' })
+  @ApiProperty({
+    description:
+      'Running total of entry fees collected from participants in stroops',
+  })
+  total_entry_fees_collected: string;
+
   @Column({ type: 'varchar', length: 100, default: 'general' })
   @ApiProperty({ description: 'Normalized campaign category slug' })
   category: string;

@@ -138,6 +138,15 @@ export default function CreateEventForm() {
       maxParticipants > MAX_PARTICIPANTS
     )
       errs.maxParticipants = `Participants must be between ${MIN_PARTICIPANTS} and ${MAX_PARTICIPANTS}.`;
+    if (!startTime) {
+      errs.startTime = "Start time is required.";
+    }
+    if (!endTime) {
+      errs.endTime = "End time is required.";
+    }
+    if (startTime && endTime && new Date(startTime) >= new Date(endTime)) {
+      errs.endTime = "End time must be after start time.";
+    }
     if (prizePool < 0)
       errs.prizePool = "Prize pool cannot be negative.";
     if (entryFee < 0)
@@ -313,6 +322,9 @@ export default function CreateEventForm() {
                 onChange={(e) => patch({ startTime: e.target.value })}
                 className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               />
+              {errors.startTime && (
+                <p className="text-xs text-rose-400">{errors.startTime}</p>
+              )}
             </div>
             <div className="space-y-2">
               <label
@@ -328,6 +340,9 @@ export default function CreateEventForm() {
                 onChange={(e) => patch({ endTime: e.target.value })}
                 className="w-full rounded-2xl border border-white/10 bg-slate-950/90 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               />
+              {errors.endTime && (
+                <p className="text-xs text-rose-400">{errors.endTime}</p>
+              )}
             </div>
           </div>
 

@@ -51,6 +51,24 @@ pub fn get_event_participants(env: &Env, event_id: u64) -> Result<Vec<Address>, 
     Ok(storage::get_event_participants(env, event_id))
 }
 
+/// Return the escrowed prize pool (in stroops) for an existing event.
+///
+/// Validates that `event_id` exists, then returns the stored `prize_pool`.
+/// A "fun event" (no payouts) returns `0`.
+pub fn get_event_prize_pool(env: &Env, event_id: u64) -> Result<i128, EventError> {
+    let event = event::get_event(env, event_id)?;
+    Ok(event.prize_pool)
+}
+
+/// Return the reward distribution percentages for an existing event.
+///
+/// Validates that `event_id` exists, then returns the stored
+/// `reward_distribution`. The vector is empty for a "fun event".
+pub fn get_event_reward_distribution(env: &Env, event_id: u64) -> Result<Vec<u32>, EventError> {
+    let event = event::get_event(env, event_id)?;
+    Ok(event.reward_distribution)
+}
+
 /// Build aggregate statistics for an existing event.
 ///
 /// The function first retrieves the event to validate that `event_id` exists,

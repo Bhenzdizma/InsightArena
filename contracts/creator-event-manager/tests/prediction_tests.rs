@@ -4,7 +4,7 @@ use creator_event_manager::CreatorEventManagerContractClient;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::token::StellarAssetClient;
-use soroban_sdk::{Address, Env, String, Symbol};
+use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 const FEE: i128 = 1_000_000;
 
@@ -71,6 +71,8 @@ fn create_event_and_match(
         &max_participants,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(env),
     );
 
     let match_id = env.as_contract(contract_id, || {
@@ -321,6 +323,8 @@ fn test_get_user_predictions_returns_all_for_event() {
         &2u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let (match_id_1, match_id_2) = env.as_contract(&contract_id, || {
@@ -396,6 +400,8 @@ fn test_get_user_predictions_sorted_by_predicted_at() {
         &2u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let (match_id_1, match_id_2) = env.as_contract(&contract_id, || {
@@ -562,6 +568,8 @@ fn test_get_prediction_distribution_multiple_matches_independent() {
         &2u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let (match_id_1, match_id_2) = env.as_contract(&contract_id, || {

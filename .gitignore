@@ -17,3 +17,5 @@ build/
 /build/
 
 issue.md
+CLAUDE.md
+.playwright-mcp

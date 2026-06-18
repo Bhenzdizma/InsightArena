@@ -30,6 +30,11 @@ import { SearchEventsResponseDto } from './dto/search-events-response.dto';
 import { UserScoreResponseDto } from './dto/user-score-response.dto';
 import { UserPredictionsResponseDto } from './dto/user-predictions-response.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
+import {
+  PaginatedPayoutsDto,
+  PayoutEntryDto,
+  PayoutsQueryDto,
+} from './dto/payouts.dto';
 
 @ApiTags('creator-events')
 @Controller('creator-events')
@@ -198,6 +203,58 @@ export class CreatorEventsController {
     @Param('address') address: string,
   ): Promise<UserScoreResponseDto> {
     return this.creatorEventsService.getUserScore(id, address);
+  }
+
+  /**
+   * GET /api/creator-events/:id/payouts
+   * #958 — Paginated list of all prize payouts for a finalized event,
+   * ordered by rank ascending. Returns 404 when the event does not exist
+   * or has not been finalized yet.
+   */
+  @Get(':id/payouts')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(60) // 1 minute — payouts are immutable once created
+  @ApiOperation({ summary: 'List all prize payouts for a finalized event' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated payout list ordered by rank',
+    type: PaginatedPayoutsDto,
+  })
+  @ApiResponse({ status: 404, description: 'Event not found or not finalized' })
+  getPayouts(
+    @Param('id') id: string,
+    @Query(new ValidationPipe({ transform: true, whitelist: true }))
+    query: PayoutsQueryDto,
+  ): Promise<PaginatedPayoutsDto> {
+    return this.creatorEventsService.getPayouts(id, query);
+  }
+
+  /**
+   * GET /api/creator-events/:id/payouts/:address
+   * #958 — Returns the payout record for a single address.
+   * Returns 404 when the address did not participate or the event has not
+   * been finalized.
+   */
+  @Get(':id/payouts/:address')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(60)
+  @ApiOperation({ summary: 'Get prize payout for a specific address' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payout record for the address',
+    type: PayoutEntryDto,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Address has no payout in this event',
+  })
+  getPayoutByAddress(
+    @Param('id') id: string,
+    @Param('address') address: string,
+  ): Promise<PayoutEntryDto> {
+    return this.creatorEventsService.getPayoutByAddress(id, address);
   }
 }
 

@@ -6,7 +6,7 @@ use creator_event_manager::storage_types::{
     Event, Match, MatchResult, Prediction, MAX_TEAM_NAME_LEN, OUTCOME_DRAW, OUTCOME_TEAM_A,
     OUTCOME_TEAM_B,
 };
-use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol};
+use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol, Vec};
 
 // =============================================================================
 // Helpers
@@ -24,6 +24,8 @@ fn make_event(env: &Env, event_id: u64) -> Event {
         1_640_995_200u64 + 86400, // end_time (24 hours later)
         Symbol::new(env, "ABCD1234"),
         100u32,
+        0i128,
+        Vec::new(env),
     )
 }
 
@@ -131,6 +133,8 @@ fn test_event_add_participant_rejects_when_full() {
         2000u64, // end_time
         Symbol::new(&env, "LIMIT1"),
         1u32,
+        0i128,
+        Vec::new(&env),
     );
     assert!(event.add_participant().is_ok());
     assert_eq!(

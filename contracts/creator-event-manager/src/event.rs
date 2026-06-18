@@ -4,7 +4,8 @@ use crate::admin;
 use crate::invite::{self, InviteError};
 use crate::storage::{self, TTL_LEDGERS};
 use crate::storage_types::{
-    DataKey, Event, MAX_DESCRIPTION_LEN, MAX_EVENT_DURATION_SECONDS, MAX_TITLE_LEN,
+    DataKey, Event, MAX_DESCRIPTION_LEN, MAX_EVENT_DURATION_SECONDS, MAX_REWARD_RANKS, MAX_TITLE_LEN,
+    REWARD_PERCENT_TOTAL,
 };
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,12 @@ pub enum EventError {
     EventStartInPast = 11,
     /// (end_time - start_time) exceeds MAX_EVENT_DURATION_SECONDS
     EventDurationTooLong = 12,
+    /// prize_pool < 0
+    InvalidPrizePool = 13,
+    /// reward_distribution is malformed (see `validate_reward_distribution`).
+    InvalidRewardDistribution = 14,
+    /// Creator's XLM balance is below the requested prize_pool.
+    InsufficientPrizePoolFunds = 15,
 }
 
 impl From<InviteError> for EventError {
@@ -46,6 +53,53 @@ impl From<InviteError> for EventError {
             InviteError::CodeGenerationFailed => EventError::CodeGenerationFailed,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Prize pool validation
+// ---------------------------------------------------------------------------
+
+/// Validate a prize pool and its reward distribution.
+///
+/// Rules:
+/// * `prize_pool` must be `>= 0` ([`EventError::InvalidPrizePool`]).
+/// * When `prize_pool > 0`:
+///   * `reward_distribution` must be non-empty,
+///   * have at most [`MAX_REWARD_RANKS`] entries,
+///   * every entry must be in `1..=REWARD_PERCENT_TOTAL`,
+///   * and the entries must sum to exactly [`REWARD_PERCENT_TOTAL`].
+/// * When `prize_pool == 0` (a "fun event"), `reward_distribution` must be empty.
+fn validate_prize_pool(prize_pool: i128, reward_distribution: &Vec<u32>) -> Result<(), EventError> {
+    if prize_pool < 0 {
+        return Err(EventError::InvalidPrizePool);
+    }
+
+    if prize_pool == 0 {
+        // Fun event: no payouts, so no distribution may be specified.
+        if !reward_distribution.is_empty() {
+            return Err(EventError::InvalidRewardDistribution);
+        }
+        return Ok(());
+    }
+
+    // prize_pool > 0 from here on.
+    if reward_distribution.is_empty() || reward_distribution.len() > MAX_REWARD_RANKS {
+        return Err(EventError::InvalidRewardDistribution);
+    }
+
+    let mut sum: u32 = 0;
+    for percent in reward_distribution.iter() {
+        if percent == 0 || percent > REWARD_PERCENT_TOTAL {
+            return Err(EventError::InvalidRewardDistribution);
+        }
+        sum += percent;
+    }
+
+    if sum != REWARD_PERCENT_TOTAL {
+        return Err(EventError::InvalidRewardDistribution);
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -61,14 +115,18 @@ impl From<InviteError> for EventError {
 /// 4. Validate `max_participants > 0`.
 /// 5. Validate time range: `start_time < end_time`, `start_time >= current_time`,
 ///    and duration `<= MAX_EVENT_DURATION_SECONDS`.
-/// 6. Check creator has sufficient XLM balance for the creation fee.
-/// 7. Transfer the fee from creator to treasury.
-/// 8. Assign a new `event_id` via the global counter.
-/// 9. Generate a unique 8-character invite code.
-/// 10. Persist the `Event`, empty participant list, empty match list, and the
+/// 6. Validate the prize pool and reward distribution.
+/// 7. Check creator has sufficient XLM balance for the creation fee.
+/// 8. Transfer the fee from creator to treasury.
+/// 9. If `prize_pool > 0`, escrow the prize pool from creator into the contract
+///    address (a separate transfer from the creation fee → treasury transfer).
+/// 10. Assign a new `event_id` via the global counter.
+/// 11. Generate a unique 8-character invite code.
+/// 12. Persist the `Event`, empty participant list, empty match list, and the
 ///     invite-code → event_id reverse index.
-/// 11. Emit an `EventCreated` event.
-/// 12. Return `(event_id, invite_code)`.
+/// 13. Emit an `EventCreated` event, plus a `prize_pool_funded` event when the
+///     event is funded.
+/// 14. Return `(event_id, invite_code)`.
 pub fn create_event(
     env: &Env,
     creator: Address,
@@ -77,6 +135,8 @@ pub fn create_event(
     max_participants: u32,
     start_time: u64,
     end_time: u64,
+    prize_pool: i128,
+    reward_distribution: Vec<u32>,
 ) -> Result<(u64, Symbol), EventError> {
     creator.require_auth();
 
@@ -114,6 +174,9 @@ pub fn create_event(
         return Err(EventError::EventDurationTooLong);
     }
 
+    // Validate the prize pool and its reward distribution.
+    validate_prize_pool(prize_pool, &reward_distribution)?;
+
     let fee = admin::get_creation_fee(env).unwrap_or_else(|| panic!("not_initialized"));
     let treasury = admin::get_treasury(env).unwrap_or_else(|| panic!("not_initialized"));
     let xlm_token = admin::get_xlm_token(env).unwrap_or_else(|| panic!("not_initialized"));
@@ -124,8 +187,20 @@ pub fn create_event(
         return Err(EventError::InsufficientFee);
     }
 
-    // Transfer creation fee from creator to treasury.
+    // The creator must be able to cover the prize pool on top of the creation
+    // fee. Check this before either transfer so we never move only the fee.
+    if prize_pool > 0 && token_client.balance(&creator) < fee + prize_pool {
+        return Err(EventError::InsufficientPrizePoolFunds);
+    }
+
+    // Transfer creation fee from creator to treasury (platform anti-spam fee).
     token_client.transfer(&creator, &treasury, &fee);
+
+    // Escrow the prize pool from creator into the contract address. This is a
+    // distinct transfer from the creation-fee → treasury transfer above.
+    if prize_pool > 0 {
+        token_client.transfer(&creator, &env.current_contract_address(), &prize_pool);
+    }
 
     let event_id = storage::next_event_id(env);
     let invite_code = invite::generate_invite_code(env).map_err(EventError::from)?;
@@ -141,6 +216,8 @@ pub fn create_event(
         end_time,
         invite_code.clone(),
         max_participants,
+        prize_pool,
+        reward_distribution.clone(),
     );
 
     storage::set_event(env, event_id, &event);
@@ -173,6 +250,17 @@ pub fn create_event(
         (Symbol::new(env, "event"), Symbol::new(env, "created")),
         (event_id, creator, invite_code.clone()),
     );
+
+    // Announce the escrowed prize pool so off-chain indexers can track funding.
+    if prize_pool > 0 {
+        env.events().publish(
+            (
+                Symbol::new(env, "event"),
+                Symbol::new(env, "prize_pool_funded"),
+            ),
+            (event_id, prize_pool, reward_distribution),
+        );
+    }
 
     Ok((event_id, invite_code))
 }

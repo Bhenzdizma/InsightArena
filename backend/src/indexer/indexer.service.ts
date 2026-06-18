@@ -12,6 +12,8 @@ import { IndexerCheckpoint } from './entities/indexer-checkpoint.entity';
 import { IndexerMetricsDto } from './dto/indexer-metrics.dto';
 import { Match, WinningTeam } from '../matches/entities/match.entity';
 import { CreatorEvent } from '../matches/entities/creator-event.entity';
+import { CreatorEventLeaderboardEntry } from '../matches/entities/creator-event-leaderboard-entry.entity';
+import { CreatorEventPayout } from '../matches/entities/creator-event-payout.entity';
 import {
   MatchPrediction,
   PredictedOutcome,
@@ -62,6 +64,12 @@ export class IndexerService implements OnModuleInit {
 
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+
+    @InjectRepository(CreatorEventLeaderboardEntry)
+    private readonly creatorEventLeaderboardEntryRepository: Repository<CreatorEventLeaderboardEntry>,
+
+    @InjectRepository(CreatorEventPayout)
+    private readonly creatorEventPayoutRepository: Repository<CreatorEventPayout>,
 
     private readonly notificationGeneratorService: NotificationGeneratorService,
     private readonly broadcasterService: BroadcasterService,
@@ -337,6 +345,11 @@ export class IndexerService implements OnModuleInit {
     )
       return 'WinnersVerified';
     if (
+      topicStr.includes('eventfinalized') ||
+      hasTopicPair('event', 'finalized')
+    )
+      return 'EventFinalized';
+    if (
       topicStr.includes('eventcancelled') ||
       hasTopicPair('event', 'cancelled')
     )
@@ -406,6 +419,7 @@ export class IndexerService implements OnModuleInit {
           user_address: this.readStr(base, 'user_address'),
           event_id: this.readBigInt(base, 'event_id'),
           joined_at: this.readNum(base, 'joined_at'),
+          entry_fee_paid: this.readUnsignedBigInt(base, 'entry_fee_paid'),
         };
       case 'PredictionSubmitted':
         return {
@@ -433,6 +447,15 @@ export class IndexerService implements OnModuleInit {
           event_id: this.readBigInt(base, 'event_id'),
           verified_at: this.readNum(base, 'verified_at'),
           winners: Array.isArray(base.winners) ? base.winners : [],
+        };
+      case 'EventFinalized':
+        return {
+          event_id: this.readBigInt(base, 'event_id'),
+          finalized_at: this.readNum(base, 'finalized_at'),
+          // leaderboard is passed through as-is; per-entry unwrapping happens
+          // inside handleEventFinalized to keep extractEventData free of
+          // business logic.
+          leaderboard: Array.isArray(base.leaderboard) ? base.leaderboard : [],
         };
       case 'EventCancelled':
         return {
@@ -541,6 +564,9 @@ export class IndexerService implements OnModuleInit {
         break;
       case 'WinnersVerified':
         void this.handleWinnersVerified(data);
+        break;
+      case 'EventFinalized':
+        await this.handleEventFinalized(data);
         break;
       case 'EventCancelled':
         await this.handleEventCancelled(data);
@@ -693,6 +719,17 @@ export class IndexerService implements OnModuleInit {
     }
 
     event.participant_count += 1;
+
+    const entryFeePaid = this.readUnsignedBigInt(data, 'entry_fee_paid');
+    if (BigInt(entryFeePaid) > 0n) {
+      event.prize_pool = (
+        BigInt(event.prize_pool ?? '0') + BigInt(entryFeePaid)
+      ).toString();
+      event.total_entry_fees_collected = (
+        BigInt(event.total_entry_fees_collected ?? '0') + BigInt(entryFeePaid)
+      ).toString();
+    }
+
     await this.creatorEventRepository.save(event);
 
     // Trigger notification
@@ -921,6 +958,149 @@ export class IndexerService implements OnModuleInit {
     // Trigger notification
     await this.notificationGeneratorService.handleWinnersVerified(data);
     this.broadcasterService.broadcastWinnersVerified(data);
+  }
+
+  private async handleEventFinalized(
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const onChainEventId = Number(data.event_id);
+    if (!onChainEventId) {
+      this.logger.warn('EventFinalized skipped: missing event_id');
+      return;
+    }
+
+    const event = await this.creatorEventRepository.findOne({
+      where: { on_chain_event_id: onChainEventId },
+    });
+    if (!event) {
+      this.logger.warn(
+        `EventFinalized skipped: event ${onChainEventId} not found in DB`,
+      );
+      return;
+    }
+
+    const eventIdStr = String(onChainEventId);
+
+    // Idempotency guard: if any payout rows already exist for this event the
+    // entire EventFinalized payload has already been processed (payouts are
+    // created atomically per entry in the loop below). An early exit here is
+    // safe because the creation path uses the same event_id string key.
+    const existingCount = await this.creatorEventPayoutRepository.count({
+      where: { event_id: eventIdStr },
+    });
+    if (existingCount > 0) {
+      this.logger.log(
+        `EventFinalized idempotent skip: payouts already exist for event ${onChainEventId}`,
+      );
+      return;
+    }
+
+    // Mark finalized in DB in case this event was finalized by a third party
+    // (contract is permissionless) and the finalizer service has not yet run.
+    if (!event.is_finalized) {
+      event.is_finalized = true;
+      await this.creatorEventRepository.save(event);
+    }
+
+    const leaderboard: unknown[] = Array.isArray(data.leaderboard)
+      ? data.leaderboard
+      : [];
+
+    let successCount = 0;
+    for (const rawEntry of leaderboard) {
+      try {
+        await this.processLeaderboardEntry(eventIdStr, rawEntry);
+        successCount++;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        this.logger.warn(
+          `EventFinalized: failed to persist entry for event ${onChainEventId}: ${message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Indexed EventFinalized: event_id=${onChainEventId} entries=${successCount}/${leaderboard.length}`,
+    );
+
+    this.broadcasterService.broadcastEventFinalized(data);
+  }
+
+  /**
+   * Upserts one CreatorEventLeaderboardEntry and creates the linked
+   * CreatorEventPayout for a single participant in an EventFinalized payload.
+   *
+   * Time complexity: O(1) per entry — two indexed point-lookups + two writes.
+   * Space complexity: O(1).
+   */
+  private async processLeaderboardEntry(
+    eventIdStr: string,
+    raw: unknown,
+  ): Promise<void> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+
+    const entry = raw as Record<string, unknown>;
+    const userAddress = this.readStr(entry, 'address');
+    const rank = this.readNum(entry, 'rank');
+    const payoutAmountStroops = this.readUnsignedBigInt(entry, 'payout_amount');
+    const totalPredictions = this.readNum(entry, 'total_predictions') ?? 0;
+    const correctPredictions = this.readNum(entry, 'correct_predictions') ?? 0;
+
+    if (!userAddress || rank === null) {
+      this.logger.warn(
+        `processLeaderboardEntry: skipping entry with missing address or rank`,
+      );
+      return;
+    }
+
+    const accuracyPercentage =
+      totalPredictions > 0
+        ? Math.round((correctPredictions / totalPredictions) * 10000) / 100
+        : 0;
+
+    const isWinner = BigInt(payoutAmountStroops) > 0n;
+
+    // Upsert leaderboard entry — the contract is the source of truth for final
+    // rankings, so we overwrite any pre-existing DB values.
+    let leaderboardEntry = await this.creatorEventLeaderboardEntryRepository.findOne(
+      { where: { event_id: eventIdStr, user_address: userAddress } },
+    );
+
+    if (!leaderboardEntry) {
+      leaderboardEntry = this.creatorEventLeaderboardEntryRepository.create({
+        event_id: eventIdStr,
+        user_address: userAddress,
+        rank,
+        total_predictions: totalPredictions,
+        correct_predictions: correctPredictions,
+        accuracy_percentage: accuracyPercentage,
+        is_winner: isWinner,
+        completion_time: null,
+      });
+    } else {
+      leaderboardEntry.rank = rank;
+      leaderboardEntry.total_predictions = totalPredictions;
+      leaderboardEntry.correct_predictions = correctPredictions;
+      leaderboardEntry.accuracy_percentage = accuracyPercentage;
+      leaderboardEntry.is_winner = isWinner;
+    }
+
+    leaderboardEntry = await this.creatorEventLeaderboardEntryRepository.save(
+      leaderboardEntry,
+    );
+
+    // Create the payout row linked to the leaderboard entry.
+    // The idempotency check at the top of handleEventFinalized ensures we only
+    // reach this point once per event, so we use a plain insert here.
+    const payout = this.creatorEventPayoutRepository.create({
+      event_id: eventIdStr,
+      user_address: userAddress,
+      payout_amount_stroops: payoutAmountStroops,
+      is_claimed: false,
+      leaderboard_entry_id: leaderboardEntry.id,
+    });
+
+    await this.creatorEventPayoutRepository.save(payout);
   }
 
   private async handleEventCancelled(

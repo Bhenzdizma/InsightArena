@@ -13,7 +13,7 @@ use creator_event_manager::CreatorEventManagerContractClient;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::token::StellarAssetClient;
-use soroban_sdk::{Address, Env, String, Symbol};
+use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 const FEE: i128 = 1_000_000;
 
@@ -81,6 +81,8 @@ fn create_event_with_match(
         &10u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(env),
     );
 
     let match_id = env.as_contract(contract_id, || {

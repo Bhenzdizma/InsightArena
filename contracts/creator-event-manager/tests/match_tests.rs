@@ -5,7 +5,7 @@ use creator_event_manager::CreatorEventManagerContractClient;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::token::StellarAssetClient;
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
 const FEE: i128 = 1_000_000;
 
@@ -67,6 +67,8 @@ fn create_event_default(
         &max_participants,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(env),
     )
 }
 

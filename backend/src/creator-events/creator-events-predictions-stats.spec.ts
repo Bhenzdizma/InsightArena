@@ -26,6 +26,7 @@ describe('CreatorEventsService predictions and stats', () => {
       | 'getPredictionDistribution'
     >
   >;
+  let creatorEventRepository: { createQueryBuilder: jest.Mock; findOne: jest.Mock };
 
   const mockEvent = {
     eventId: '1',
@@ -71,13 +72,18 @@ describe('CreatorEventsService predictions and stats', () => {
       getPredictionDistribution: jest.fn(),
     };
 
+    creatorEventRepository = {
+      createQueryBuilder: jest.fn(),
+      findOne: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CreatorEventsService,
         { provide: ContractService, useValue: contractService },
         {
           provide: getRepositoryToken(CreatorEvent),
-          useValue: { createQueryBuilder: jest.fn() },
+          useValue: creatorEventRepository,
         },
         {
           provide: getRepositoryToken(CreatorEventLeaderboardEntry),
@@ -178,6 +184,11 @@ describe('CreatorEventsService predictions and stats', () => {
     });
 
     it('calculates event statistics with distribution and completion rate', async () => {
+      creatorEventRepository.findOne.mockResolvedValue({
+        prize_pool: '5010000000',
+        total_entry_fees_collected: '10000000',
+      });
+
       const result = await service.getEventStats('1');
 
       expect(result.totalParticipants).toBe(3);
@@ -190,6 +201,17 @@ describe('CreatorEventsService predictions and stats', () => {
       expect(result.averagePredictionsPerUser).toBe(1.67);
       expect(result.completionRate).toBe(67);
       expect(result.winnersVerified).toBe(false);
+      expect(result.prizePool).toBe('5010000000');
+      expect(result.totalEntryFeesCollected).toBe('10000000');
+    });
+
+    it('defaults prize pool and entry fees to "0" when no cached event exists', async () => {
+      creatorEventRepository.findOne.mockResolvedValue(null);
+
+      const result = await service.getEventStats('1');
+
+      expect(result.prizePool).toBe('0');
+      expect(result.totalEntryFeesCollected).toBe('0');
     });
 
     it('throws when event is not found', async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Link from "next/link";
 
 type MarketStatus = "Open" | "Resolved" | "Cancelled";
 type Tab = "All Markets" | "My Markets" | "Bookmarked";
@@ -65,9 +66,12 @@ export default function MarketsPage() {
           <h1 className="text-2xl font-bold text-white">Markets</h1>
           <p className="text-sm text-gray-400">Browse and predict on live prediction markets.</p>
         </div>
-        <button className="inline-flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition-colors">
+        <Link
+          href="/markets/create"
+          className="inline-flex items-center gap-2 rounded-lg bg-orange-500 hover:bg-orange-400 px-4 py-2 text-sm font-semibold text-white transition-colors"
+        >
           + Create Market
-        </button>
+        </Link>
       </div>
 
       {/* Tabs */}

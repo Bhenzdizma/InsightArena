@@ -62,6 +62,9 @@ export class CreatorEvent {
   @Column({ type: 'bigint', default: '0' })
   entry_fee: string;
 
+  @Column({ type: 'bigint', default: '0' })
+  total_entry_fees_collected: string;
+
   @Column({ type: 'varchar', length: 100, default: 'general' })
   category: string;
 

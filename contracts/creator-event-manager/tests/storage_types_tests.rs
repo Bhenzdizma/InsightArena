@@ -4,7 +4,7 @@
 use creator_event_manager::storage_types::{
     Event, Match, MatchResult, Prediction, OUTCOME_DRAW, OUTCOME_TEAM_A, OUTCOME_TEAM_B,
 };
-use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol};
+use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol, Vec};
 
 // ---------------------------------------------------------------------------
 // MatchResult
@@ -51,6 +51,8 @@ fn make_event(env: &Env, event_id: u64) -> Event {
         1_641_081_600u64,
         Symbol::new(env, "ABCD1234"),
         100u32,
+        0i128,
+        Vec::new(env),
     )
 }
 
@@ -77,6 +79,8 @@ fn test_event_creation() {
         1_641_081_600u64,
         invite_code.clone(),
         50u32,
+        0i128,
+        Vec::new(&env),
     );
 
     assert_eq!(event.event_id, 1);
@@ -144,6 +148,8 @@ fn test_event_max_participants() {
         7_200u64,
         Symbol::new(&env, "CAPCODE1"),
         2u32,
+        0i128,
+        Vec::new(&env),
     );
 
     assert!(event.add_participant().is_ok());
@@ -165,6 +171,8 @@ fn test_event_unlimited_participants() {
         7_200u64,
         Symbol::new(&env, "OPENCODE"),
         0u32, // 0 = unlimited
+        0i128,
+        Vec::new(&env),
     );
 
     for _ in 0..10 {

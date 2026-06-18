@@ -124,4 +124,18 @@ export class BroadcasterService {
     this.gateway.server.to(`event:${eventId}`).emit('event:cancelled', payload);
     this.logger.log(`Broadcast event:cancelled → event:${eventId}`);
   }
+
+  broadcastEventFinalized(data: Record<string, unknown>): void {
+    const eventId = String(data.event_id);
+    const payload = {
+      event: 'event:finalized',
+      data: {
+        event_id: eventId,
+        finalized_at: data.finalized_at,
+        leaderboard: data.leaderboard,
+      },
+    };
+    this.gateway.server.to(`event:${eventId}`).emit('event:finalized', payload);
+    this.logger.log(`Broadcast event:finalized → event:${eventId}`);
+  }
 }

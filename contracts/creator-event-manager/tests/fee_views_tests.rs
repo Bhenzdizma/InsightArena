@@ -2,7 +2,7 @@ use creator_event_manager::CreatorEventManagerContractClient;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::token::Client as TokenClient;
 use soroban_sdk::token::StellarAssetClient;
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, Vec};
 
 const FEE: i128 = 1_000_000;
 
@@ -85,6 +85,8 @@ fn test_treasury_balance_and_withdraw_success() {
         &2u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     // Treasury address should now have the fee
@@ -138,6 +140,8 @@ fn test_withdraw_non_admin_rejected() {
         &2u32,
         &start_time,
         &end_time,
+        &0i128,
+        &Vec::new(&env),
     );
 
     let non_admin = Address::generate(&env);

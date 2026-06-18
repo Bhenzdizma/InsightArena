@@ -65,4 +65,16 @@ export class EventStatsResponseDto {
     description: 'Percentage of participants who predicted all matches (0-100)',
   })
   completionRate: number;
+
+  @ApiProperty({
+    description:
+      'Total prize pool in stroops, including entry fees collected from participants',
+  })
+  prizePool: string;
+
+  @ApiProperty({
+    description:
+      'Running total of entry fees collected from participants in stroops',
+  })
+  totalEntryFeesCollected: string;
 }

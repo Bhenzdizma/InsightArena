@@ -419,10 +419,14 @@ export class CreatorEventsService {
       throw new NotFoundException(`Event ${eventId} not found`);
     }
 
-    const [statistics, matches, participants] = await Promise.all([
+    const [statistics, matches, participants, cachedEvent] = await Promise.all([
       this.contractService.getEventStatistics(eventId),
       this.contractService.getEventMatches(eventId),
       this.contractService.getEventParticipants(eventId),
+      this.creatorEventRepository.findOne({
+        where: { on_chain_event_id: Number(eventId) as unknown as number },
+        select: ['prize_pool', 'total_entry_fees_collected'],
+      }),
     ]);
 
     const matchesResolved = matches.filter((m) => m.resolved).length;
@@ -479,6 +483,8 @@ export class CreatorEventsService {
       winnerCount: statistics?.winnerCount ?? 0,
       averagePredictionsPerUser,
       completionRate,
+      prizePool: cachedEvent?.prize_pool ?? '0',
+      totalEntryFeesCollected: cachedEvent?.total_entry_fees_collected ?? '0',
     };
   }
 
@@ -727,6 +733,92 @@ export class CreatorEventsService {
 
   private escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * GET /creator-events/:id/payouts
+   *
+   * Returns all payout records for a finalized event, ordered by rank ASC.
+   * Raises 404 when the event does not exist or is not yet finalized so the
+   * frontend knows not to show the payouts UI prematurely.
+   *
+   * Time complexity: O(k log n) where k = limit, n = total payout rows.
+   * The query uses the IDX_cep_event_id index + leaderboard entry JOIN.
+   */
+  async getPayouts(
+    eventId: string,
+    query: PayoutsQueryDto,
+  ): Promise<PaginatedPayoutsDto> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const cachedEvent = await this.creatorEventRepository.findOne({
+      where: { on_chain_event_id: Number(eventId) as unknown as number },
+      select: ['is_finalized'],
+    });
+
+    if (!cachedEvent?.is_finalized) {
+      throw new NotFoundException(
+        `Event ${eventId} is not finalized or does not exist`,
+      );
+    }
+
+    const [payouts, total] = await this.creatorEventPayoutRepository
+      .createQueryBuilder('payout')
+      .leftJoinAndSelect('payout.leaderboard_entry', 'entry')
+      .where('payout.event_id = :eventId', { eventId })
+      .orderBy('entry.rank', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      data: payouts.map((p) => this.toPayoutDto(p)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * GET /creator-events/:id/payouts/:address
+   *
+   * Returns a single payout for the given address.
+   * Returns 404 when the address has no payout row (i.e. the address did not
+   * participate, or the event has not been finalized yet).
+   *
+   * Time complexity: O(log n) — uses the UQ_cep_event_address composite index.
+   */
+  async getPayoutByAddress(
+    eventId: string,
+    address: string,
+  ): Promise<PayoutEntryDto> {
+    const payout = await this.creatorEventPayoutRepository.findOne({
+      where: { event_id: eventId, user_address: address },
+      relations: ['leaderboard_entry'],
+    });
+
+    if (!payout) {
+      throw new NotFoundException(
+        `No payout found for address ${address} in event ${eventId}`,
+      );
+    }
+
+    return this.toPayoutDto(payout);
+  }
+
+  private toPayoutDto(payout: CreatorEventPayout): PayoutEntryDto {
+    return {
+      id: payout.id,
+      event_id: payout.event_id,
+      user_address: payout.user_address,
+      payout_amount_stroops: payout.payout_amount_stroops,
+      is_claimed: payout.is_claimed,
+      rank: payout.leaderboard_entry?.rank ?? 0,
+      is_winner: payout.leaderboard_entry?.is_winner ?? false,
+      created_at: payout.created_at,
+    };
   }
 
   async getLeaderboard(

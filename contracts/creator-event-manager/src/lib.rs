@@ -257,6 +257,12 @@ impl CreatorEventManagerContract {
     /// * `"event_duration_too_long"` — duration exceeds MAX_EVENT_DURATION_SECONDS.
     /// * `"insufficient_fee"` — creator's XLM balance is below the creation fee.
     /// * `"code_generation_failed"` — could not generate a unique invite code.
+    /// * `"invalid_prize_pool"` — `prize_pool` is negative.
+    /// * `"invalid_reward_distribution"` — distribution is malformed (empty when
+    ///   funded, too many ranks, a zero/over-100 entry, a non-100 sum, or a
+    ///   non-empty distribution on an unfunded event).
+    /// * `"insufficient_prize_pool_funds"` — creator cannot cover
+    ///   `creation_fee + prize_pool`.
     pub fn create_event(
         env: Env,
         creator: Address,
@@ -265,6 +271,8 @@ impl CreatorEventManagerContract {
         max_participants: u32,
         start_time: u64,
         end_time: u64,
+        prize_pool: i128,
+        reward_distribution: Vec<u32>,
     ) -> (u64, Symbol) {
         match event::create_event(
             &env,
@@ -274,6 +282,8 @@ impl CreatorEventManagerContract {
             max_participants,
             start_time,
             end_time,
+            prize_pool,
+            reward_distribution,
         ) {
             Ok(result) => result,
             Err(EventError::Paused) => panic!("contract_paused"),
@@ -286,6 +296,9 @@ impl CreatorEventManagerContract {
             Err(EventError::InsufficientFee) => panic!("insufficient_fee"),
             Err(EventError::TransferFailed) => panic!("transfer_failed"),
             Err(EventError::CodeGenerationFailed) => panic!("code_generation_failed"),
+            Err(EventError::InvalidPrizePool) => panic!("invalid_prize_pool"),
+            Err(EventError::InvalidRewardDistribution) => panic!("invalid_reward_distribution"),
+            Err(EventError::InsufficientPrizePoolFunds) => panic!("insufficient_prize_pool_funds"),
             Err(_) => panic!("unexpected_error"),
         }
     }
@@ -313,6 +326,34 @@ impl CreatorEventManagerContract {
         match event::get_event_by_code(&env, invite_code) {
             Ok(e) => e,
             Err(EventError::InvalidInviteCode) => panic!("invalid_invite_code"),
+            Err(EventError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Return the escrowed prize pool (in stroops) for an event.
+    ///
+    /// Returns `0` for a "fun event" with no payouts.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_event_prize_pool(env: Env, event_id: u64) -> i128 {
+        match views::get_event_prize_pool(&env, event_id) {
+            Ok(prize_pool) => prize_pool,
+            Err(EventError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Return the reward distribution percentages for an event.
+    ///
+    /// The vector is empty for a "fun event" with no payouts.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_event_reward_distribution(env: Env, event_id: u64) -> Vec<u32> {
+        match views::get_event_reward_distribution(&env, event_id) {
+            Ok(distribution) => distribution,
             Err(EventError::EventNotFound) => panic!("event_not_found"),
             Err(_) => panic!("unexpected_error"),
         }

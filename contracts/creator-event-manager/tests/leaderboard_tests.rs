@@ -75,6 +75,8 @@ fn create_event_with_matches(
         &100u32,
         &start_time,
         &end_time,
+        &0i128,
+        &soroban_sdk::Vec::new(env),
     );
 
     let mut match_ids: Vec<u64> = Vec::new();

@@ -1,8 +1,13 @@
-use soroban_sdk::{contracttype, Address, String, Symbol};
+use soroban_sdk::{contracttype, Address, String, Symbol, Vec};
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+/// Maximum number of leaderboard ranks that can receive a prize pool payout.
+pub const MAX_REWARD_RANKS: u32 = 5;
+/// The reward distribution percentages must sum to exactly this value.
+pub const REWARD_PERCENT_TOTAL: u32 = 100;
 
 /// Maximum length for event title (characters)
 pub const MAX_TITLE_LEN: u32 = 200;
@@ -224,6 +229,19 @@ pub struct Event {
 
     /// Number of matches that belong to this event
     pub match_count: u32,
+
+    /// XLM prize pool (in stroops) escrowed in the contract for winners.
+    /// `0` means this is a "fun event" with no payouts.
+    pub prize_pool: i128,
+
+    /// Percentage of the prize pool awarded to each leaderboard rank, in
+    /// 1-based rank order (index 0 → rank 1). Each entry is 1–100 and the
+    /// entries sum to `REWARD_PERCENT_TOTAL` when `prize_pool > 0`; the vector
+    /// is empty when `prize_pool == 0`.
+    pub reward_distribution: Vec<u32>,
+
+    /// Whether the prize pool has been distributed / the event closed out.
+    pub is_finalized: bool,
 }
 
 impl Event {
@@ -240,6 +258,8 @@ impl Event {
         end_time: u64,
         invite_code: Symbol,
         max_participants: u32,
+        prize_pool: i128,
+        reward_distribution: Vec<u32>,
     ) -> Self {
         Self {
             event_id,
@@ -256,6 +276,9 @@ impl Event {
             max_participants,
             participant_count: 0,
             match_count: 0,
+            prize_pool,
+            reward_distribution,
+            is_finalized: false,
         }
     }
 
