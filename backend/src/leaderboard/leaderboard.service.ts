@@ -7,6 +7,9 @@ import {
   IsNull,
   MoreThanOrEqual,
 } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Inject } from '@nestjs/common';
+import type { Cache } from 'cache-manager';
 import { LeaderboardEntry } from './entities/leaderboard-entry.entity';
 import { LeaderboardHistory } from './entities/leaderboard-history.entity';
 import { UsersService } from '../users/users.service';
@@ -22,10 +25,16 @@ import {
   PaginatedLeaderboardHistoryResponse,
 } from './dto/leaderboard-history.dto';
 import { UserRankDto } from './dto/user-rank.dto';
+import {
+  CursorPaginationDto,
+  PaginatedCursorResponse,
+} from './dto/cursor-pagination.dto';
+import { CACHE_WARMING_KEYS } from '../cache/cache-warming.keys';
 
 @Injectable()
 export class LeaderboardService {
   private readonly logger = new Logger(LeaderboardService.name);
+  private readonly CACHE_TTL_MS = 1 * 60 * 60 * 1000; // 1 hour
 
   constructor(
     @InjectRepository(LeaderboardEntry)
@@ -34,6 +43,7 @@ export class LeaderboardService {
     private readonly historyRepository: Repository<LeaderboardHistory>,
     private readonly usersService: UsersService,
     private readonly dataSource: DataSource,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async getLeaderboard(
@@ -81,6 +91,140 @@ export class LeaderboardService {
     });
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * Get leaderboard with cursor-based pagination and caching
+   * Cursor is keyed on (rank, user_id) for stable pagination
+   */
+  async getLeaderboardCursor(
+    query: CursorPaginationDto,
+  ): Promise<PaginatedCursorResponse> {
+    const limit = Math.min(query.limit ?? 20, 100);
+    const cacheKey = CACHE_WARMING_KEYS.leaderboardCursor(
+      query.season_id ?? null,
+      query.cursor ? 1 : 0,
+    );
+
+    const cached =
+      await this.cacheManager.get<PaginatedCursorResponse>(cacheKey);
+    if (cached && !query.cursor) {
+      this.logger.debug(`Cache hit for cursor pagination: ${cacheKey}`);
+      return cached;
+    }
+
+    const qb = this.leaderboardRepository
+      .createQueryBuilder('entry')
+      .leftJoinAndSelect('entry.user', 'user');
+
+    if (query.season_id) {
+      qb.where('entry.season_id = :season_id', { season_id: query.season_id });
+      qb.orderBy('entry.season_points', 'DESC');
+    } else {
+      qb.where('entry.season_id IS NULL');
+      qb.orderBy('entry.reputation_score', 'DESC');
+    }
+
+    qb.addOrderBy('entry.rank', 'ASC');
+
+    if (query.cursor) {
+      const [rankStr, userId] = query.cursor.split(':');
+      const rank = parseInt(rankStr, 10);
+
+      const cursorEntry = await this.leaderboardRepository.findOne({
+        where: { rank, user_id: userId },
+      });
+
+      if (cursorEntry) {
+        if (query.season_id) {
+          qb.andWhere(
+            '(entry.season_points < :season_points OR (entry.season_points = :season_points AND entry.rank > :rank))',
+            {
+              season_points: cursorEntry.season_points,
+              rank: cursorEntry.rank,
+            },
+          );
+        } else {
+          qb.andWhere(
+            '(entry.reputation_score < :reputation_score OR (entry.reputation_score = :reputation_score AND entry.rank > :rank))',
+            {
+              reputation_score: cursorEntry.reputation_score,
+              rank: cursorEntry.rank,
+            },
+          );
+        }
+      }
+    }
+
+    const entries = await qb.take(limit + 1).getMany();
+
+    const hasMore = entries.length > limit;
+    const data = entries.slice(0, limit).map((entry) => {
+      const accuracyRate =
+        entry.total_predictions > 0
+          ? (
+              (entry.correct_predictions / entry.total_predictions) *
+              100
+            ).toFixed(1)
+          : '0.0';
+
+      const cursor = `${entry.rank}:${entry.user_id}`;
+
+      return {
+        rank: entry.rank,
+        user_id: entry.user_id,
+        username: entry.user?.username ?? null,
+        stellar_address: entry.user?.stellar_address ?? '',
+        reputation_score: entry.reputation_score,
+        accuracy_rate: accuracyRate,
+        total_winnings_stroops: entry.total_winnings_stroops,
+        season_points: entry.season_points,
+        cursor,
+      };
+    });
+
+    const nextCursor =
+      hasMore && data.length > 0 ? data[data.length - 1].cursor : null;
+    const result: PaginatedCursorResponse = {
+      data,
+      next_cursor: nextCursor,
+      has_more: hasMore,
+      limit,
+    };
+
+    if (!query.cursor) {
+      await this.cacheManager.set(cacheKey, result, this.CACHE_TTL_MS);
+      this.logger.debug(`Cached cursor pagination page: ${cacheKey}`);
+    }
+
+    return result;
+  }
+
+  /**
+   * Invalidate all cached leaderboard cursor pages for a season
+   */
+  private async invalidateLeaderboardCache(seasonId?: string): Promise<void> {
+    try {
+      const season = seasonId ?? 'all';
+      const pageKeys = ['page:0', 'page:1'];
+
+      let invalidatedCount = 0;
+      for (const pageKey of pageKeys) {
+        const key = `leaderboard:cursor:${season}:${pageKey}`;
+        await this.cacheManager.del(key);
+        invalidatedCount++;
+      }
+
+      if (invalidatedCount > 0) {
+        this.logger.log(
+          `Invalidated ${invalidatedCount} cached leaderboard pages for season: ${season}`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate leaderboard cache: ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   /**
@@ -142,6 +286,8 @@ export class LeaderboardService {
     this.logger.log(
       `Leaderboard recalculation complete: ${sorted.length} users updated in ${elapsed}ms`,
     );
+
+    await this.invalidateLeaderboardCache();
   }
 
   /**
