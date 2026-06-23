@@ -2,7 +2,13 @@ export type EmailTemplateType =
   | 'event_created'
   | 'match_result_available'
   | 'event_won'
-  | 'event_cancelled';
+  | 'event_cancelled'
+  | 'digest';
+
+export interface DigestItem {
+  title: string;
+  message: string;
+}
 
 export interface EmailTemplateContext {
   eventTitle?: string;
@@ -12,6 +18,9 @@ export interface EmailTemplateContext {
   matchResult?: string;
   userAddress?: string;
   inviteCode?: string;
+  digestFrequency?: 'daily' | 'weekly';
+  digestItems?: DigestItem[];
+  digestPeriod?: string;
 }
 
 const baseStyles = `
@@ -71,6 +80,33 @@ export function renderEmailTemplate(
         ),
         text: `The event "${context.eventTitle ?? 'Event'}" has been cancelled.`,
       };
+
+    case 'digest': {
+      const freq = context.digestFrequency === 'weekly' ? 'Weekly' : 'Daily';
+      const items = context.digestItems ?? [];
+      const itemsHtml = items
+        .map(
+          (item) =>
+            `<div style="border-left:3px solid #6366f1;padding:8px 12px;margin:8px 0;">
+               <strong>${escapeHtml(item.title)}</strong>
+               <p style="margin:4px 0 0;color:#475569;">${escapeHtml(item.message)}</p>
+             </div>`,
+        )
+        .join('');
+      const itemsText = items
+        .map((item) => `• ${item.title}: ${item.message}`)
+        .join('\n');
+      return {
+        subject: `Your ${freq} InsightArena digest — ${context.digestPeriod ?? ''}`.trimEnd(),
+        html: wrapHtml(
+          `${freq} Activity Digest`,
+          `<p>Here's a summary of your recent activity on InsightArena:</p>
+           ${itemsHtml}
+           <p style="margin-top:16px;color:#475569;font-size:13px;">You have ${items.length} unread notification${items.length === 1 ? '' : 's'}.</p>`,
+        ),
+        text: `Your ${freq.toLowerCase()} InsightArena digest:\n\n${itemsText}`,
+      };
+    }
 
     default:
       return {

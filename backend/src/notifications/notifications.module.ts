@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { Notification } from './entities/notification.entity';
+import { NotificationDigestState } from './entities/notification-digest-state.entity';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
 import { EmailService } from './email.service';
 import { NotificationGeneratorService } from './notification-generator.service';
+import { DigestService } from './digest.service';
 import { UsersModule } from '../users/users.module';
 import { User } from '../users/entities/user.entity';
 import { UserPreferences } from '../users/entities/user-preferences.entity';
@@ -17,17 +20,24 @@ import { WebsocketModule } from '../websocket/websocket.module';
   imports: [
     TypeOrmModule.forFeature([
       Notification,
+      NotificationDigestState,
       User,
       UserPreferences,
       CreatorEvent,
       Match,
       MatchPrediction,
     ]),
+    ScheduleModule,
     UsersModule,
     WebsocketModule,
   ],
   controllers: [NotificationsController],
-  providers: [NotificationsService, EmailService, NotificationGeneratorService],
+  providers: [
+    NotificationsService,
+    EmailService,
+    NotificationGeneratorService,
+    DigestService,
+  ],
   exports: [NotificationsService, EmailService, NotificationGeneratorService],
 })
 export class NotificationsModule {}

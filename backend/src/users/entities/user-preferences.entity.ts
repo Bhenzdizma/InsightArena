@@ -54,6 +54,9 @@ export class UserPreferences {
   @Column({ default: true })
   event_cancelled_notifications: boolean;
 
+  @Column({ type: 'varchar', default: 'off' })
+  digest_frequency: 'daily' | 'weekly' | 'off';
+
   @CreateDateColumn()
   created_at: Date;
 
