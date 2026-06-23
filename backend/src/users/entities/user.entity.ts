@@ -62,6 +62,11 @@ export class User {
   @IsIn(['user', 'admin'])
   role: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  @IsOptional()
+  @IsString()
+  email: string | null;
+
   @Column({ default: false })
   is_banned: boolean;
 
