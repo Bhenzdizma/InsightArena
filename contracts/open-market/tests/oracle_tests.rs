@@ -237,3 +237,24 @@ fn test_resolve_market_before_resolution_time() {
         Err(Ok(InsightArenaError::MarketStillOpen))
     ));
 }
+
+#[test]
+fn resolve_market_rejects_one_second_before_and_succeeds_at_resolution_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, oracle) = deploy(&env);
+    let creator = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    let mut params = default_params(&env);
+    params.resolution_time = now + 3600;
+
+    let id = client.create_market(&creator, &params);
+
+    env.ledger().set_timestamp(now + 3599);
+    let early = client.try_resolve_market(&oracle, &id, &symbol_short!("yes"));
+    assert!(matches!(early, Err(Ok(InsightArenaError::MarketStillOpen))));
+
+    env.ledger().set_timestamp(now + 3600);
+    client.resolve_market(&oracle, &id, &symbol_short!("yes"));
+    assert!(client.get_market(&id).is_resolved);
+}

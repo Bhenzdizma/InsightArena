@@ -1,7 +1,7 @@
 use insightarena_contract::config;
 use insightarena_contract::{InsightArenaContract, InsightArenaContractClient, InsightArenaError};
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env};
+use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
+use soroban_sdk::{Address, Env, IntoVal};
 
 fn deploy(env: &Env) -> InsightArenaContractClient<'_> {
     let id = env.register(InsightArenaContract, ());
@@ -130,4 +130,62 @@ fn test_config_update_unauthorized() {
     client.initialize(&admin, &oracle, &200_u32, &register_token(&env));
 
     let _ = env.as_contract(&client.address, || config::set_paused(&env, true));
+}
+
+#[test]
+fn transfer_admin_revokes_old_admin_privileges() {
+    let env = Env::default();
+    let client = deploy(&env);
+    let admin_a = Address::generate(&env);
+    let admin_b = Address::generate(&env);
+    let oracle = Address::generate(&env);
+
+    client.initialize(&admin_a, &oracle, &200_u32, &register_token(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &admin_a,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "transfer_admin",
+            args: (admin_b.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.transfer_admin(&admin_b);
+    assert_eq!(client.get_config().admin, admin_b);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin_a,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "update_protocol_fee",
+            args: (300_u32,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(client.try_update_protocol_fee(&300_u32).is_err());
+
+    env.mock_auths(&[MockAuth {
+        address: &admin_b,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "update_protocol_fee",
+            args: (300_u32,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.update_protocol_fee(&300_u32);
+    assert_eq!(client.get_config().protocol_fee_bps, 300);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin_a,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "transfer_admin",
+            args: (admin_a.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(client.try_transfer_admin(&admin_a).is_err());
+    assert_eq!(client.get_config().admin, admin_b);
 }
