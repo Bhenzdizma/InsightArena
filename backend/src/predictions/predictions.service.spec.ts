@@ -14,7 +14,7 @@ import { User } from '../users/entities/user.entity';
 import { SorobanService } from '../soroban/soroban.service';
 
 type MockRepo<T extends ObjectLiteral> = jest.Mocked<
-  Pick<Repository<T>, 'findOne' | 'create' | 'save'>
+  Pick<Repository<T>, 'findOne' | 'create' | 'save' | 'findAndCount'>
 >;
 
 const makeUser = (overrides: Partial<User> = {}): User =>
@@ -66,6 +66,7 @@ describe('PredictionsService', () => {
     const qbMock = {
       update: jest.fn().mockReturnThis(),
       set: jest.fn().mockReturnThis(),
+      setParameters: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       execute: jest.fn().mockResolvedValue(undefined),
     };
@@ -74,12 +75,14 @@ describe('PredictionsService', () => {
       findOne: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
+      findAndCount: jest.fn(),
     };
 
     mockMarketsRepo = {
       findOne: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
+      findAndCount: jest.fn(),
     };
 
     mockSoroban = {

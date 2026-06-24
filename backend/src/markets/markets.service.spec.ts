@@ -198,6 +198,102 @@ describe('MarketsService', () => {
   });
 
   describe('getTrendingMarkets', () => {
+    let realDateNow: () => number;
+
+    beforeEach(() => {
+      realDateNow = Date.now.bind(globalThis.Date);
+    });
+
+    afterEach(() => {
+      (globalThis.Date as any).now = realDateNow;
+    });
+
+    it('should populate cache on first call', async () => {
+      const fixedTime = 1_000_000_000_000;
+      (globalThis.Date as any).now = () => fixedTime;
+
+      const markets = [
+        {
+          id: 'market-1',
+          title: 'Low activity market',
+          description: 'desc',
+          category: 'Crypto',
+          outcome_options: ['Yes', 'No'],
+          end_time: new Date(fixedTime + 48 * 60 * 60 * 1000),
+          is_resolved: false,
+          is_cancelled: false,
+          participant_count: 2,
+          total_pool_stroops: '1000000',
+          created_at: new Date(fixedTime),
+        },
+      ];
+      marketsRepository.find.mockResolvedValue(markets as Market[]);
+
+      await service.getTrendingMarkets({ page: 1, limit: 20 });
+
+      expect(marketsRepository.find).toHaveBeenCalledTimes(1);
+      // cache is private; verify behavior via second call within TTL
+      (globalThis.Date as any).now = () => fixedTime + 1000;
+      await service.getTrendingMarkets({ page: 1, limit: 20 });
+      expect(marketsRepository.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('should return cached results within TTL', async () => {
+      const fixedTime = 1_000_000_000_000;
+      (globalThis.Date as any).now = () => fixedTime;
+
+      const markets = [
+        {
+          id: 'market-1',
+          title: 'Low activity market',
+          description: 'desc',
+          category: 'Crypto',
+          outcome_options: ['Yes', 'No'],
+          end_time: new Date(fixedTime + 48 * 60 * 60 * 1000),
+          is_resolved: false,
+          is_cancelled: false,
+          participant_count: 2,
+          total_pool_stroops: '1000000',
+          created_at: new Date(fixedTime),
+        },
+      ];
+      marketsRepository.find.mockResolvedValue(markets as Market[]);
+
+      await service.getTrendingMarkets({ page: 1, limit: 20 });
+      await service.getTrendingMarkets({ page: 1, limit: 20 });
+
+      expect(marketsRepository.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('should query DB again after TTL expires', async () => {
+      const fixedTime = 1_000_000_000_000;
+      (globalThis.Date as any).now = () => fixedTime;
+
+      const markets = [
+        {
+          id: 'market-1',
+          title: 'Low activity market',
+          description: 'desc',
+          category: 'Crypto',
+          outcome_options: ['Yes', 'No'],
+          end_time: new Date(fixedTime + 48 * 60 * 60 * 1000),
+          is_resolved: false,
+          is_cancelled: false,
+          participant_count: 2,
+          total_pool_stroops: '1000000',
+          created_at: new Date(fixedTime),
+        },
+      ];
+      marketsRepository.find.mockResolvedValue(markets as Market[]);
+
+      await service.getTrendingMarkets({ page: 1, limit: 20 });
+      // Advance past TTL (15 minutes = 900000ms)
+      (globalThis.Date as any).now = () => fixedTime + 900_001;
+      await service.getTrendingMarkets({ page: 1, limit: 20 });
+
+      expect(marketsRepository.find).toHaveBeenCalledTimes(2);
+    });
+
     it('should return trending markets sorted by trending score', async () => {
       const now = new Date();
       const markets = [
@@ -229,7 +325,7 @@ describe('MarketsService', () => {
         },
       ] as Market[];
 
-      marketsRepository.find.mockResolvedValue(markets);
+      marketsRepository.find.mockResolvedValue(markets as Market[]);
 
       const result = await service.getTrendingMarkets({ page: 1, limit: 20 });
 

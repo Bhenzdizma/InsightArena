@@ -101,9 +101,11 @@ export class PredictionsService {
         .update(Market)
         .set({
           participant_count: () => 'participant_count + 1',
-          total_pool_stroops: () =>
-            `total_pool_stroops + ${BigInt(dto.stake_amount_stroops)}`,
+          ...(BigInt(dto.stake_amount_stroops) !== 0n
+            ? { total_pool_stroops: () => 'CAST(total_pool_stroops AS BIGINT) + :stake' }
+            : {}),
         })
+        .setParameters({ stake: dto.stake_amount_stroops })
         .where('id = :id', { id: market.id })
         .execute();
 
@@ -112,9 +114,11 @@ export class PredictionsService {
         .update(User)
         .set({
           total_predictions: () => 'total_predictions + 1',
-          total_staked_stroops: () =>
-            `total_staked_stroops + ${BigInt(dto.stake_amount_stroops)}`,
+          ...(BigInt(dto.stake_amount_stroops) !== 0n
+            ? { total_staked_stroops: () => 'CAST(total_staked_stroops AS BIGINT) + :stake' }
+            : {}),
         })
+        .setParameters({ stake: dto.stake_amount_stroops })
         .where('id = :id', { id: user.id })
         .execute();
 

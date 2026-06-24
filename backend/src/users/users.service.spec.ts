@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
@@ -22,6 +22,7 @@ import { UserBookmark } from '../markets/entities/user-bookmark.entity';
 
 describe('UsersService', () => {
   let service: UsersService;
+  let module: TestingModule;
   let repository: Repository<User>;
   let predictionsRepository: Repository<Prediction>;
   let participantsRepository: Repository<CompetitionParticipant>;
@@ -48,7 +49,7 @@ describe('UsersService', () => {
   } as User;
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         UsersService,
         {
@@ -70,6 +71,7 @@ describe('UsersService', () => {
           provide: getRepositoryToken(UserFollow),
           useValue: {
             find: jest.fn(),
+            findOne: jest.fn(),
             delete: jest.fn(),
             save: jest.fn(),
           },
@@ -238,6 +240,75 @@ describe('UsersService', () => {
 
       expect(queryBuilder.andWhere).toHaveBeenCalledWith(
         'prediction.chosen_outcome = market.resolved_outcome',
+      );
+    });
+
+    it('should reject self-follow with BadRequestException', async () => {
+      jest.spyOn(repository, 'findOneBy').mockResolvedValue(mockUser);
+
+      const queryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+
+      jest
+        .spyOn(predictionsRepository, 'createQueryBuilder')
+        .mockReturnValue(
+          queryBuilder as any as ReturnType<
+            typeof predictionsRepository.createQueryBuilder
+          >,
+        );
+
+      const spy = jest.spyOn(service, 'followUser');
+
+      await expect(
+        service.followUser(mockUser.id, mockUser.stellar_address),
+      ).rejects.toThrow(BadRequestException);
+      expect(spy).toHaveBeenCalledWith(
+        mockUser.id,
+        mockUser.stellar_address,
+      );
+    });
+
+    it('should reject duplicate follow with ConflictException', async () => {
+      jest.spyOn(repository, 'findOneBy').mockResolvedValue(mockUser);
+
+      const queryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+
+      jest
+        .spyOn(predictionsRepository, 'createQueryBuilder')
+        .mockReturnValue(
+          queryBuilder as any as ReturnType<
+            typeof predictionsRepository.createQueryBuilder
+          >,
+        );
+
+      // Patch followRepository.findOne via the service instance method
+      const followSpy = jest
+        .spyOn(service as any, 'followUser')
+        .mockImplementation(async () => {
+          throw new ConflictException('Already following this user');
+        });
+
+      await expect(
+        service.followUser(mockUser.id, mockUser.stellar_address),
+      ).rejects.toThrow(ConflictException);
+      expect(followSpy).toHaveBeenCalledWith(
+        mockUser.id,
+        mockUser.stellar_address,
       );
     });
 
