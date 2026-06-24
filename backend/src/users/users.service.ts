@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -423,7 +424,7 @@ export class UsersService {
     });
 
     if (existing) {
-      throw new BadRequestException('Already following this user');
+      throw new ConflictException('Already following this user');
     }
 
     await this.followRepository.save({
