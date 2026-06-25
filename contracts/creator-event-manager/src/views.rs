@@ -233,6 +233,17 @@ pub fn get_platform_statistics(env: &Env) -> PlatformStatistics {
     }
 }
 
+/// Return the total number of events created on the platform.
+///
+/// Reads `DataKey::EventCounter` from instance storage. Returns `0` before
+/// any events are created or before initialization.
+pub fn get_event_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get::<DataKey, u64>(&DataKey::EventCounter(0))
+        .unwrap_or(0)
+}
+
 /// Check whether a single event has been finalized.
 ///
 /// Returns `Ok(bool)` representing the event's `is_finalized` flag.

@@ -261,6 +261,90 @@ fn test_unverify_address_repeated_unverify_returns_not_verified() {
 }
 
 // ===========================================================================
+// #1026 — batch_verify_addresses returns count of only newly-verified addresses
+// ===========================================================================
+
+#[test]
+fn test_batch_verify_count_all_new_returns_full_count() {
+    let (env, client, _contract_id, admin) = setup_initialized();
+
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+
+    let mut addresses = Vec::new(&env);
+    addresses.push_back(user1.clone());
+    addresses.push_back(user2.clone());
+    addresses.push_back(user3.clone());
+
+    // All three are unverified; count must equal the batch size.
+    let count = client.batch_verify_addresses(&admin, &addresses);
+
+    assert_eq!(count, 3);
+    assert!(client.is_verified(&user1));
+    assert!(client.is_verified(&user2));
+    assert!(client.is_verified(&user3));
+}
+
+#[test]
+fn test_batch_verify_count_mixed_batch_returns_only_new_count() {
+    let (env, client, _contract_id, admin) = setup_initialized();
+
+    let pre1 = Address::generate(&env);
+    let pre2 = Address::generate(&env);
+    let new1 = Address::generate(&env);
+    let new2 = Address::generate(&env);
+    let new3 = Address::generate(&env);
+
+    // Pre-verify two addresses.
+    client.verify_address(&admin, &pre1);
+    client.verify_address(&admin, &pre2);
+
+    let mut addresses = Vec::new(&env);
+    addresses.push_back(pre1.clone());
+    addresses.push_back(pre2.clone());
+    addresses.push_back(new1.clone());
+    addresses.push_back(new2.clone());
+    addresses.push_back(new3.clone());
+
+    // Only the 3 fresh addresses should be counted.
+    let count = client.batch_verify_addresses(&admin, &addresses);
+
+    assert_eq!(count, 3);
+    // Pre-verified addresses remain verified.
+    assert!(client.is_verified(&pre1));
+    assert!(client.is_verified(&pre2));
+    // Newly verified addresses are now verified.
+    assert!(client.is_verified(&new1));
+    assert!(client.is_verified(&new2));
+    assert!(client.is_verified(&new3));
+}
+
+#[test]
+fn test_batch_verify_count_all_already_verified_returns_zero() {
+    let (env, client, _contract_id, admin) = setup_initialized();
+
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    // Pre-verify all addresses in the batch.
+    client.verify_address(&admin, &user1);
+    client.verify_address(&admin, &user2);
+
+    let mut addresses = Vec::new(&env);
+    addresses.push_back(user1.clone());
+    addresses.push_back(user2.clone());
+
+    // No new verifications — count must be 0.
+    let count = client.batch_verify_addresses(&admin, &addresses);
+
+    assert_eq!(count, 0);
+    // Addresses remain verified.
+    assert!(client.is_verified(&user1));
+    assert!(client.is_verified(&user2));
+}
+
+// ===========================================================================
 // #793 — is_verified
 // ===========================================================================
 

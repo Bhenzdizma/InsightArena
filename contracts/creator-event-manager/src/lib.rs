@@ -765,4 +765,12 @@ impl CreatorEventManagerContract {
     pub fn get_platform_statistics(env: Env) -> PlatformStatistics {
         views::get_platform_statistics(&env)
     }
+
+    /// Return the total number of events created on the platform.
+    ///
+    /// Lightweight alternative to `get_platform_statistics` for callers that
+    /// only need the event count. Returns `0` before any events are created.
+    pub fn get_event_count(env: Env) -> u64 {
+        views::get_event_count(&env)
+    }
 }

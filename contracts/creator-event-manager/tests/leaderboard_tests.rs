@@ -324,3 +324,84 @@ fn test_leaderboard_single_participant() {
     assert_eq!(leaderboard.get(0).unwrap().exact_scores, 1);
     assert_eq!(leaderboard.get(0).unwrap().matches_played, 1);
 }
+
+// ===========================================================================
+// Address tiebreaker tests (#1018)
+// ===========================================================================
+
+/// Two participants with identical scores in every dimension are ranked by
+/// address: the address that compares as `<` under Soroban's `Address` `Ord`
+/// implementation always gets rank 1.
+#[test]
+fn test_leaderboard_address_tiebreaker_smaller_address_ranks_first() {
+    let (env, client, contract_id, creator, ai_agent, xlm_token) = setup();
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    let (event_id, invite_code, match_ids) =
+        create_event_with_matches(&env, &contract_id, &client, &creator, &xlm_token, 1);
+
+    // Determine lexicographic ordering at runtime.
+    let (smaller, larger) = if user_a < user_b {
+        (user_a.clone(), user_b.clone())
+    } else {
+        (user_b.clone(), user_a.clone())
+    };
+
+    // Both join and predict the same outcome at the same ledger timestamp so
+    // that total_points, exact_scores, and last_prediction_time are identical.
+    client.join_event(&smaller, &invite_code);
+    client.join_event(&larger, &invite_code);
+    client.submit_prediction(&smaller, &match_ids.get(0).unwrap(), &1u32, &0u32);
+    client.submit_prediction(&larger, &match_ids.get(0).unwrap(), &1u32, &0u32);
+
+    // Advance past match time and submit result so both earn the same points.
+    env.ledger().set_timestamp(env.ledger().timestamp() + 300);
+    submit_match_result(&env, &client, &ai_agent, *match_ids.get(0).unwrap(), MatchResult::TeamA);
+
+    let leaderboard = client.get_event_leaderboard(&event_id);
+
+    assert_eq!(leaderboard.len(), 2);
+    assert_eq!(leaderboard.get(0).unwrap().rank, 1);
+    assert_eq!(leaderboard.get(0).unwrap().user, smaller);
+    assert_eq!(leaderboard.get(1).unwrap().rank, 2);
+    assert_eq!(leaderboard.get(1).unwrap().user, larger);
+}
+
+/// Swapping the join/predict insertion order must not change the outcome:
+/// the lexicographically smaller address always gets rank 1.
+#[test]
+fn test_leaderboard_address_tiebreaker_insertion_order_irrelevant() {
+    let (env, client, contract_id, creator, ai_agent, xlm_token) = setup();
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    let (event_id, invite_code, match_ids) =
+        create_event_with_matches(&env, &contract_id, &client, &creator, &xlm_token, 1);
+
+    let (smaller, larger) = if user_a < user_b {
+        (user_a.clone(), user_b.clone())
+    } else {
+        (user_b.clone(), user_a.clone())
+    };
+
+    // Insert in REVERSE order: larger joins and predicts first.
+    client.join_event(&larger, &invite_code);
+    client.join_event(&smaller, &invite_code);
+    client.submit_prediction(&larger, &match_ids.get(0).unwrap(), &1u32, &0u32);
+    client.submit_prediction(&smaller, &match_ids.get(0).unwrap(), &1u32, &0u32);
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 300);
+    submit_match_result(&env, &client, &ai_agent, *match_ids.get(0).unwrap(), MatchResult::TeamA);
+
+    let leaderboard = client.get_event_leaderboard(&event_id);
+
+    assert_eq!(leaderboard.len(), 2);
+    // Smaller address must still be rank 1 regardless of insertion order.
+    assert_eq!(leaderboard.get(0).unwrap().user, smaller);
+    assert_eq!(leaderboard.get(0).unwrap().rank, 1);
+    assert_eq!(leaderboard.get(1).unwrap().user, larger);
+    assert_eq!(leaderboard.get(1).unwrap().rank, 2);
+}

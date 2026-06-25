@@ -816,6 +816,76 @@ fn test_get_prediction_distribution_multiple_matches_independent() {
 
 
 // ---------------------------------------------------------------------------
+// Kickoff time boundary tests (#1017)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "match_started")]
+fn test_submit_prediction_at_exact_match_time_rejected() {
+    let (env, client, contract_id, _admin, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let predictor = Address::generate(&env);
+
+    let match_time_offset: u64 = 1000;
+    let initial_ts = env.ledger().timestamp();
+    let match_time = initial_ts + match_time_offset;
+
+    let (_event_id, invite_code, match_id) =
+        create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, match_time_offset);
+
+    client.join_event(&predictor, &invite_code);
+
+    // Advance to exactly match_time — prediction must be rejected.
+    env.ledger().with_mut(|l| l.timestamp = match_time);
+
+    client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
+}
+
+#[test]
+#[should_panic(expected = "match_started")]
+fn test_submit_prediction_after_kickoff_plus_3600_rejected() {
+    let (env, client, contract_id, _admin, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let predictor = Address::generate(&env);
+
+    let match_time_offset: u64 = 1000;
+    let initial_ts = env.ledger().timestamp();
+    let match_time = initial_ts + match_time_offset;
+
+    let (_event_id, invite_code, match_id) =
+        create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, match_time_offset);
+
+    client.join_event(&predictor, &invite_code);
+
+    // Advance to match_time + 3600 — well past kickoff.
+    env.ledger().with_mut(|l| l.timestamp = match_time + 3600);
+
+    client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
+}
+
+#[test]
+fn test_submit_prediction_just_before_kickoff_succeeds() {
+    let (env, client, contract_id, _admin, xlm_token) = setup();
+    let creator = Address::generate(&env);
+    let predictor = Address::generate(&env);
+
+    let match_time_offset: u64 = 1000;
+    let initial_ts = env.ledger().timestamp();
+    let match_time = initial_ts + match_time_offset;
+
+    let (_event_id, invite_code, match_id) =
+        create_event_and_match(&env, &contract_id, &client, &creator, &xlm_token, 2, match_time_offset);
+
+    client.join_event(&predictor, &invite_code);
+
+    // Advance to one second before match_time — prediction must succeed.
+    env.ledger().with_mut(|l| l.timestamp = match_time - 1);
+
+    let prediction_id = client.submit_prediction(&predictor, &match_id, &1u32, &0u32);
+    assert!(prediction_id >= 1);
+}
+
+// ---------------------------------------------------------------------------
 // Scoreline prediction tests (#xxx) — acceptance tests
 // These tests are intentionally omitted from compilation.
 // See SCORELINE_TESTS.md for the specification of these tests.

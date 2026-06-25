@@ -597,3 +597,96 @@ fn test_is_event_finalized_not_found() {
     client.is_event_finalized(&9999u64);
 }
 
+// =============================================================================
+// get_event_count tests (#1028)
+// =============================================================================
+
+#[test]
+fn test_get_event_count_returns_zero_before_any_events() {
+    let (_env, client, _contract_id, _xlm_token) = setup();
+    assert_eq!(client.get_event_count(), 0);
+}
+
+#[test]
+fn test_get_event_count_increments_monotonically() {
+    let (env, client, _contract_id, xlm_token) = setup();
+    let creator = Address::generate(&env);
+
+    assert_eq!(client.get_event_count(), 0);
+
+    fund(&env, &xlm_token, &creator, FEE);
+    let start_time = get_future_time(&env, 3600);
+    let end_time = get_future_time(&env, 7200);
+    client.create_event(
+        &creator,
+        &title(&env),
+        &desc(&env),
+        &5u32,
+        &start_time,
+        &end_time,
+        &0i128,
+        &Vec::new(&env),
+        &0i128,
+    );
+    assert_eq!(client.get_event_count(), 1);
+
+    fund(&env, &xlm_token, &creator, FEE);
+    let start_time2 = get_future_time(&env, 3600);
+    let end_time2 = get_future_time(&env, 7200);
+    client.create_event(
+        &creator,
+        &title(&env),
+        &desc(&env),
+        &5u32,
+        &start_time2,
+        &end_time2,
+        &0i128,
+        &Vec::new(&env),
+        &0i128,
+    );
+    assert_eq!(client.get_event_count(), 2);
+
+    fund(&env, &xlm_token, &creator, FEE);
+    let start_time3 = get_future_time(&env, 3600);
+    let end_time3 = get_future_time(&env, 7200);
+    client.create_event(
+        &creator,
+        &title(&env),
+        &desc(&env),
+        &5u32,
+        &start_time3,
+        &end_time3,
+        &0i128,
+        &Vec::new(&env),
+        &0i128,
+    );
+    assert_eq!(client.get_event_count(), 3);
+}
+
+#[test]
+fn test_get_event_count_matches_platform_statistics_total_events() {
+    let (env, client, _contract_id, xlm_token) = setup();
+    let creator = Address::generate(&env);
+
+    // Verified that get_event_count and get_platform_statistics.total_events agree.
+    assert_eq!(client.get_event_count(), client.get_platform_statistics().total_events);
+
+    fund(&env, &xlm_token, &creator, FEE);
+    let start_time = get_future_time(&env, 3600);
+    let end_time = get_future_time(&env, 7200);
+    client.create_event(
+        &creator,
+        &title(&env),
+        &desc(&env),
+        &5u32,
+        &start_time,
+        &end_time,
+        &0i128,
+        &Vec::new(&env),
+        &0i128,
+    );
+
+    assert_eq!(client.get_event_count(), client.get_platform_statistics().total_events);
+    assert_eq!(client.get_event_count(), 1);
+}
+
