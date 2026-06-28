@@ -26,7 +26,10 @@ pub struct Proposal {
     pub created_at: u64,
     pub voting_end: u64,
     pub executed: bool,
+    pub cancelled: bool,
 }
+
+
 
 fn load_registered_users(env: &Env) -> Vec<Address> {
     env.storage()
@@ -120,7 +123,9 @@ pub fn create_proposal(
         created_at,
         voting_end,
         executed: false,
+        cancelled: false,
     };
+
 
     env.storage()
         .persistent()
@@ -142,6 +147,8 @@ pub fn vote(
     if proposal.executed || env.ledger().timestamp() > proposal.voting_end {
         return Err(InsightArenaError::InvalidInput);
     }
+
+
 
     let vote_key = DataKey::ProposalVote(proposal_id, voter.clone());
     if env.storage().persistent().has(&vote_key) {
@@ -241,19 +248,21 @@ pub fn cancel_proposal(
 
     let mut proposal = load_proposal(env, proposal_id)?;
 
-    if proposal.executed {
+    if proposal.executed || proposal.cancelled {
         return Err(InsightArenaError::InvalidInput);
     }
+
 
     let cfg = config::get_config(env)?;
     if caller != proposal.proposer && caller != cfg.admin {
         return Err(InsightArenaError::Unauthorized);
     }
 
-    proposal.executed = true;
+    proposal.cancelled = true;
     store_proposal(env, &proposal);
 
     emit_proposal_cancelled(env, proposal_id);
+
 
     Ok(())
 }
