@@ -130,8 +130,7 @@ describe('ResponseInterceptor', () => {
       interceptor
         .intercept(mockExecutionContext, mockCallHandler)
         .subscribe((result) => {
-          expect(result).toBe(responseData);
-          expect(result).not.toHaveProperty('success');
+          expect(result).toBeUndefined();
           done();
         });
     });
@@ -144,8 +143,7 @@ describe('ResponseInterceptor', () => {
       interceptor
         .intercept(mockExecutionContext, mockCallHandler)
         .subscribe((result) => {
-          expect(result).toBe(responseData);
-          expect(result).not.toHaveProperty('success');
+          expect(result).toBeUndefined();
           done();
         });
     });

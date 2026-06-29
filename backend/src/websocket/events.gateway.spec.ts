@@ -16,6 +16,7 @@ const makeSocket = (overrides: Record<string, unknown> = {}) =>
     leave: jest.fn(),
     emit: jest.fn(),
     on: jest.fn(),
+    disconnect: jest.fn(),
     ...overrides,
   }) as any;
 
@@ -191,15 +192,15 @@ describe('EventsGateway', () => {
       const client = makeSocket();
       const rateLimitWindow = 60_000;
 
-      (gateway as any).rateLimits.set('socket-1', 59);
-
       await gateway.handleJoin(client, 'event:1');
 
       expect(client.disconnect).not.toHaveBeenCalled();
 
+      const rateLimits = (gateway as any).rateLimits;
+      expect(rateLimits.has('socket-1')).toBe(true);
+
       jest.advanceTimersByTime(rateLimitWindow + 100);
 
-      const rateLimits = (gateway as any).rateLimits;
       expect(rateLimits.has('socket-1')).toBe(false);
 
       jest.useRealTimers();
