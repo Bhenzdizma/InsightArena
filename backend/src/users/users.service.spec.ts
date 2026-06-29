@@ -78,6 +78,7 @@ describe('UsersService', () => {
             findOne: jest.fn(),
             delete: jest.fn(),
             save: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -643,7 +644,7 @@ describe('UsersService', () => {
 
       await expect(
         service.getFollowStats('non-existent-address'),
-      ).rejects.toThrow('User not found');
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should return zero counts for user with no followers or following', async () => {
