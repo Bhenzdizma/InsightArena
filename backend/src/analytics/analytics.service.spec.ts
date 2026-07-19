@@ -294,7 +294,9 @@ describe('AnalyticsService', () => {
         .spyOn(marketHistoryRepository, 'createQueryBuilder')
         .mockReturnValue(qb as any);
 
-      const result = await service.getMarketHistory('market-1');
+      const from = new Date('2026-05-01T00:00:00.000Z');
+      const to = new Date('2026-06-01T00:00:00.000Z');
+      const result = await service.getMarketHistory('market-1', from, to);
 
       expect(result.market_id).toBe('market-1');
       expect(result.history).toHaveLength(1);
@@ -307,7 +309,11 @@ describe('AnalyticsService', () => {
       });
       expect(qb.andWhere).toHaveBeenCalledWith(
         'history.recorded_at >= :from',
-        expect.any(Object),
+        { from },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'history.recorded_at <= :to',
+        { to },
       );
     });
 
@@ -315,7 +321,13 @@ describe('AnalyticsService', () => {
       const marketsRepository = module.get(getRepositoryToken(Market));
       jest.spyOn(marketsRepository, 'findOne').mockResolvedValue(null);
 
-      await expect(service.getMarketHistory('invalid')).rejects.toThrow(
+      await expect(
+        service.getMarketHistory(
+          'invalid',
+          new Date('2026-05-01T00:00:00.000Z'),
+          new Date('2026-06-01T00:00:00.000Z'),
+        ),
+      ).rejects.toThrow(
         'Market "invalid" not found',
       );
     });

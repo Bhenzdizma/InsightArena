@@ -100,7 +100,9 @@ describe('AnalyticsService - Market History', () => {
     const qb = marketHistoryRepository.createQueryBuilder();
     (qb.getMany as jest.Mock).mockResolvedValue(mockHistory);
 
-    const result = await service.getMarketHistory('market-1');
+    const from = new Date('2026-05-01T00:00:00.000Z');
+    const to = new Date('2026-06-01T00:00:00.000Z');
+    const result = await service.getMarketHistory('market-1', from, to);
 
     expect(result.market_id).toBe('market-1');
     expect(result.title).toBe('Test Market');
@@ -129,6 +131,12 @@ describe('AnalyticsService - Market History', () => {
   it('should throw NotFoundException for non-existent market', async () => {
     marketsRepository.findOne.mockResolvedValue(null);
 
-    await expect(service.getMarketHistory('invalid-id')).rejects.toThrow();
+    await expect(
+      service.getMarketHistory(
+        'invalid-id',
+        new Date('2026-05-01T00:00:00.000Z'),
+        new Date('2026-06-01T00:00:00.000Z'),
+      ),
+    ).rejects.toThrow();
   });
 });

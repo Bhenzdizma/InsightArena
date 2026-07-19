@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { DateRangeQueryDto } from '../common/dto/date-range-query.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { BanGuard } from '../common/guards/ban.guard';
 import { User } from '../users/entities/user.entity';
@@ -338,12 +340,14 @@ export class MarketsController {
     status: 200,
     description: 'Historical data points',
   })
+  @ApiResponse({ status: 400, description: 'Invalid date range query' })
   @ApiResponse({ status: 404, description: 'Market not found' })
   async getMarketHistory(
     @Param('id') id: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
+    @Query(new ValidationPipe({ transform: true, whitelist: true }))
+    query: DateRangeQueryDto,
   ) {
+    const { from, to } = query.resolveRange();
     return this.analyticsService.getMarketHistory(id, from, to);
   }
 

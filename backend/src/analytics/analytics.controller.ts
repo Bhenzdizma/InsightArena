@@ -1,4 +1,11 @@
-import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  UseInterceptors,
+  ValidationPipe,
+} from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
   ApiBearerAuth,
@@ -8,6 +15,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { DateRangeQueryDto } from '../common/dto/date-range-query.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { User } from '../users/entities/user.entity';
 import { AnalyticsService } from './analytics.service';
@@ -57,18 +65,6 @@ export class AnalyticsController {
   @Public()
   @ApiOperation({ summary: 'Get historical data for a market over time' })
   @ApiQuery({
-    name: 'from',
-    required: false,
-    type: String,
-    description: 'Start date (ISO string)',
-  })
-  @ApiQuery({
-    name: 'to',
-    required: false,
-    type: String,
-    description: 'End date (ISO string)',
-  })
-  @ApiQuery({
     name: 'interval',
     required: false,
     type: String,
@@ -80,13 +76,15 @@ export class AnalyticsController {
       'Market history with prediction volume, pool size, and participant growth',
     type: MarketHistoryResponseDto,
   })
+  @ApiResponse({ status: 400, description: 'Invalid date range query' })
   @ApiResponse({ status: 404, description: 'Market not found' })
   async getMarketHistory(
     @Param('id') id: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
+    @Query(new ValidationPipe({ transform: true, whitelist: true }))
+    query: DateRangeQueryDto,
     @Query('interval') interval?: string, // TODO: Implement interval-based aggregation
   ): Promise<MarketHistoryResponseDto> {
+    const { from, to } = query.resolveRange();
     return this.analyticsService.getMarketHistory(id, from, to, interval);
   }
 

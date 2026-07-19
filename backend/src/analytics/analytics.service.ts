@@ -197,8 +197,8 @@ export class AnalyticsService {
    */
   async getMarketHistory(
     marketId: string,
-    from?: string,
-    to?: string,
+    from: Date,
+    to: Date,
     interval?: string, // TODO: Implement interval-based aggregation
   ): Promise<MarketHistoryResponseDto> {
     if (interval) {
@@ -219,17 +219,8 @@ export class AnalyticsService {
       .createQueryBuilder('history')
       .where('history.marketId = :marketId', { marketId: market.id });
 
-    if (from) {
-      qb.andWhere('history.recorded_at >= :from', { from });
-    } else {
-      const lastWeek = new Date();
-      lastWeek.setDate(lastWeek.getDate() - 7);
-      qb.andWhere('history.recorded_at >= :from', { from: lastWeek });
-    }
-
-    if (to) {
-      qb.andWhere('history.recorded_at <= :to', { to });
-    }
+    qb.andWhere('history.recorded_at >= :from', { from });
+    qb.andWhere('history.recorded_at <= :to', { to });
 
     qb.orderBy('history.recorded_at', 'ASC');
 

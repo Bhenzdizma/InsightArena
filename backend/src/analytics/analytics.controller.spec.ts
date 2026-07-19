@@ -7,6 +7,7 @@ import { DashboardKpisDto } from './dto/dashboard-kpis.dto';
 import { MarketAnalyticsDto } from './dto/market-analytics.dto';
 import { MarketHistoryResponseDto } from './dto/market-history.dto';
 import { User } from '../users/entities/user.entity';
+import { DateRangeQueryDto } from '../common/dto/date-range-query.dto';
 
 describe('AnalyticsController', () => {
   let controller: AnalyticsController;
@@ -176,57 +177,67 @@ describe('AnalyticsController', () => {
   describe('getMarketHistory', () => {
     it('should return market history with default parameters', async () => {
       service.getMarketHistory.mockResolvedValue(mockMarketHistory);
+      const query = new DateRangeQueryDto();
+      const before = Date.now();
 
-      const result = await controller.getMarketHistory('market-123');
+      const result = await controller.getMarketHistory('market-123', query);
+
+      const [marketId, from, to, interval] =
+        service.getMarketHistory.mock.calls[0];
 
       expect(result).toEqual(mockMarketHistory);
-      expect(service.getMarketHistory).toHaveBeenCalledWith(
-        'market-123',
-        undefined,
-        undefined,
-        undefined,
+      expect(marketId).toBe('market-123');
+      expect(interval).toBeUndefined();
+      expect((to as Date).getTime()).toBeGreaterThanOrEqual(before);
+      expect((to as Date).getTime() - (from as Date).getTime()).toBeCloseTo(
+        30 * 24 * 60 * 60 * 1000,
+        -3,
       );
     });
 
     it('should return market history with query parameters', async () => {
       service.getMarketHistory.mockResolvedValue(mockMarketHistory);
+      const query = new DateRangeQueryDto();
+      query.from = '2024-01-01T00:00:00.000Z';
+      query.to = '2024-01-31T23:59:59.999Z';
 
       const result = await controller.getMarketHistory(
         'market-123',
-        '2024-01-01',
-        '2024-01-31',
+        query,
         'day',
       );
 
       expect(result).toEqual(mockMarketHistory);
       expect(service.getMarketHistory).toHaveBeenCalledWith(
         'market-123',
-        '2024-01-01',
-        '2024-01-31',
+        new Date('2024-01-01T00:00:00.000Z'),
+        new Date('2024-01-31T23:59:59.999Z'),
         'day',
       );
     });
 
-    it('should default to last 7 days if no range provided', async () => {
+    it('should default to the last 30 days when no range is provided', async () => {
       const historyWithDefaults = { ...mockMarketHistory };
       service.getMarketHistory.mockResolvedValue(historyWithDefaults);
+      const query = new DateRangeQueryDto();
 
-      const result = await controller.getMarketHistory('market-123');
+      const result = await controller.getMarketHistory('market-123', query);
+
+      const [, from, to] = service.getMarketHistory.mock.calls.at(-1)!;
 
       expect(result).toEqual(historyWithDefaults);
-      expect(service.getMarketHistory).toHaveBeenCalledWith(
-        'market-123',
-        undefined,
-        undefined,
-        undefined,
+      expect((to as Date).getTime() - (from as Date).getTime()).toBeCloseTo(
+        30 * 24 * 60 * 60 * 1000,
+        -3,
       );
     });
 
     it('should throw 404 for unknown market ID', async () => {
       service.getMarketHistory.mockRejectedValue(new Error('Market not found'));
+      const query = new DateRangeQueryDto();
 
       await expect(
-        controller.getMarketHistory('unknown-market'),
+        controller.getMarketHistory('unknown-market', query),
       ).rejects.toThrow();
     });
   });
