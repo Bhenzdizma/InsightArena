@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Header from "@/component/Header";
 import Footer from "@/component/Footer";
 import PageBackground from "@/component/PageBackground";
@@ -27,58 +27,87 @@ export default function MarketsPage() {
   const [status, setStatus] = useState("All");
   const [sort, setSort] = useState("newest");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /**
+   * Monotonically-increasing counter used as a generation token.
+   * Each time the fetch effect fires it increments this counter and captures the
+   * current value; if the value has changed by the time the response arrives a
+   * newer request is in-flight and this response is discarded (stale-response
+   * guard).
+   */
+  const fetchGenRef = useRef(0);
+
+  const loadMarkets = useCallback(() => {
+    const controller = new AbortController();
+    const gen = ++fetchGenRef.current;
+
+    setLoading(true);
+    setError(null);
+
+    const base = process.env.NEXT_PUBLIC_API_URL || "";
+
+    fetch(`${base}/api/v1/markets`, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        return res.json() as Promise<Market[]>;
+      })
+      .then((data) => {
+        if (gen !== fetchGenRef.current) return; // stale — discard
+        setMarkets(data || []);
+      })
+      .catch((err: unknown) => {
+        // AbortError is expected on cleanup — swallow silently
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (gen !== fetchGenRef.current) return; // stale — discard
+        // Fallback mock data so the page is still usable during development /
+        // when the API is unreachable, but surface the error for production.
+        setMarkets([
+          {
+            id: "1",
+            title: "Will BTC be above $70k on 2026-12-31?",
+            category: "Crypto",
+            probability: 0.42,
+            totalStaked: 124.5,
+            closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(),
+            status: "active",
+          },
+          {
+            id: "2",
+            title: "Team A to beat Team B in the Finals",
+            category: "Sports",
+            probability: 0.66,
+            totalStaked: 52.1,
+            closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3).toISOString(),
+            status: "active",
+          },
+          {
+            id: "3",
+            title: "Will inflation drop below 3% in 2026?",
+            category: "Economics",
+            probability: 0.28,
+            totalStaked: 18.0,
+            closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 60).toISOString(),
+            status: "upcoming",
+          },
+        ]);
+        setError(err instanceof Error ? err.message : "Failed to load markets");
+      })
+      .finally(() => {
+        if (gen !== fetchGenRef.current) return; // stale — discard
+        setLoading(false);
+      });
+
+    return controller;
+  }, []);
 
   useEffect(() => {
-    let mounted = true;
-    async function load() {
-      setLoading(true);
-      try {
-        const base = process.env.NEXT_PUBLIC_API_URL || "";
-        const res = await fetch(`${base}/api/v1/markets`);
-        if (!res.ok) throw new Error("fetch failed");
-        const data = await res.json();
-        if (mounted) setMarkets(data || []);
-      } catch (e) {
-        // fallback mock data
-        if (mounted)
-          setMarkets([
-            {
-              id: "1",
-              title: "Will BTC be above $70k on 2026-12-31?",
-              category: "Crypto",
-              probability: 0.42,
-              totalStaked: 124.5,
-              closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(),
-              status: "active",
-            },
-            {
-              id: "2",
-              title: "Team A to beat Team B in the Finals",
-              category: "Sports",
-              probability: 0.66,
-              totalStaked: 52.1,
-              closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3).toISOString(),
-              status: "active",
-            },
-            {
-              id: "3",
-              title: "Will inflation drop below 3% in 2026?",
-              category: "Economics",
-              probability: 0.28,
-              totalStaked: 18.0,
-              closeAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 60).toISOString(),
-              status: "upcoming",
-            },
-          ]);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-    load();
+    const controller = loadMarkets();
+    // Cleanup: abort the in-flight request on unmount or before the next run.
+    // The resulting AbortError is caught and ignored above.
     return () => {
-      mounted = false;
+      controller.abort();
     };
-  }, []);
+  }, [loadMarkets]);
 
   const categories = useMemo(() => {
     const set = new Set(markets.map((m) => m.category));
@@ -174,9 +203,24 @@ export default function MarketsPage() {
             <div className="ml-auto text-sm text-gray-400">{filtered.length} results</div>
           </div>
 
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 flex items-center justify-between rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+            >
+              <span>{error}</span>
+              <button
+                onClick={() => loadMarkets()}
+                className="ml-4 rounded bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/30 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {loading && <div className="py-12 text-center text-gray-400">Loading markets...</div>}
 
-          {!loading && paged.length === 0 && (
+          {!loading && paged.length === 0 && !error && (
             <div className="rounded-md border border-white/6 bg-white/3 p-8 text-center text-gray-300">No markets found.</div>
           )}
 
