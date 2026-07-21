@@ -119,10 +119,31 @@ pnpm build       # Next.js production build (catches type errors)
 pnpm type-check  # tsc --noEmit (if script exists)
 ```
 
+## Testing
+
+Tests use [Vitest](https://vitest.dev) with [React Testing Library](https://testing-library.com/react) and run in a jsdom environment. The `@/` path alias resolves the same way it does in the app.
+
+```bash
+pnpm test        # run the full test suite once
+```
+
+Test files live next to the code they cover, named `*.test.ts` / `*.test.tsx` (e.g. `src/lib/utils.test.ts`, `src/hooks/useEvent.test.ts`).
+
+When adding a test for a hook or component that depends on a context (e.g. `CreatorEventsContext`), mock the context module with `vi.mock(...)` rather than wrapping the render in a real provider, so tests stay isolated from network/wallet state:
+
+```ts
+vi.mock("@/context/CreatorEventsContext", () => ({
+  useCreatorEvents: vi.fn(),
+}));
+```
+
+New hooks, contexts, and utils should ship with at least one test proving the happy path and one covering an error/edge case.
+
 ## Pull Request Checklist
 
 - [ ] `pnpm build` passes with no errors
 - [ ] `pnpm lint` passes with no errors
+- [ ] `pnpm test` passes with no errors
 - [ ] New public pages use `PageBackground` wrapper
 - [ ] New authenticated pages do NOT add `DashboardShell` (handled by layout)
 - [ ] No hardcoded wallet addresses or usernames
