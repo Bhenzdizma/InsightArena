@@ -1,6 +1,6 @@
 # Rust/Cargo
 /target/
-Cargo.lock
+# Cargo.lock is committed to pin reproducible dependency versions for CI
 
 # IDE
 .vscode/
