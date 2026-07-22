@@ -560,8 +560,6 @@ export class MarketsService {
   async cancelMarket(id: string, user: User): Promise<Market> {
     const market = await this.findByIdOrOnChainId(id);
 
-
-
     const isAdmin = user.role === 'admin';
     const isCreator = market.creator.id === user.id;
     if (!isAdmin && !isCreator) {
@@ -814,7 +812,6 @@ export class MarketsService {
   async resumeMarket(id: string, user: User): Promise<Market> {
     const market = await this.findByIdOrOnChainId(id);
 
-
     if (user.role !== 'admin') {
       throw new ForbiddenException('Only admin can resume markets');
     }
@@ -833,7 +830,9 @@ export class MarketsService {
 
     // Optional: don't allow resuming after end_time has passed
     if (new Date() > market.end_time) {
-      throw new BadRequestException('Cannot resume market after end_time has passed');
+      throw new BadRequestException(
+        'Cannot resume market after end_time has passed',
+      );
     }
 
     try {
@@ -852,9 +851,7 @@ export class MarketsService {
   async removeBookmark(marketId: string, user: User): Promise<void> {
     const market = await this.findByIdOrOnChainId(marketId);
 
-
     await this.userBookmarksRepository.delete({
-
       user: { id: user.id },
       market: { id: market.id },
     });

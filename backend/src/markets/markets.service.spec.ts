@@ -398,7 +398,6 @@ describe('MarketsService.findFeaturedMarkets', () => {
     reset: jest.fn(),
   };
 
-
   const makeFeaturedMarket = (overrides: Partial<Market> = {}): Market =>
     ({
       id: `market-${Math.random()}`,
