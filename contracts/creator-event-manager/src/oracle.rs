@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, Symbol};
 
 use crate::admin;
+use crate::leaderboard;
 use crate::storage::{self, StorageError};
 use crate::storage_types::{Event, Match, MatchResult};
 
@@ -142,6 +143,12 @@ pub fn submit_match_result(
             storage::set_prediction(env, prediction_id, &prediction);
         }
     }
+
+    // 8b. Recompute and persist the event's weighted standings (#1311).
+    leaderboard::recompute_standings(env, match_record.event_id).map_err(|e| match e {
+        leaderboard::LeaderboardError::Overflow => OracleError::Overflow,
+        _ => OracleError::EventNotFound,
+    })?;
 
     // 9. Emit the result event using the derived outcome symbol.
     let outcome_symbol = match result {

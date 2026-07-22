@@ -31,6 +31,76 @@ pub const POINTS_EXACT_SCORE: u32 = 3;
 pub const MAX_POINTS_MULTIPLIER: u32 = 3;
 
 // ---------------------------------------------------------------------------
+// Weighted scoring multipliers (#1311)
+// ---------------------------------------------------------------------------
+//
+// A correct prediction's weighted contribution is its `points_earned`
+// multiplied by a basis-point factor:
+//
+//     weight = WEIGHT_BASE_BPS
+//            + EARLY_PREDICTION_BONUS_BPS  (if placed early — see below)
+//            + UNDERDOG_BONUS_BPS          (if it went against the crowd)
+//
+//     contribution = points_earned × weight     (in point-basis-point units)
+//
+// A plain correct result placed late with the crowd is worth 1 × 10_000 =
+// 10_000 weighted units; the same prediction placed early and against the
+// crowd is worth 1 × 17_500 — strictly higher. Wrong predictions (0 points)
+// contribute nothing regardless of timing or crowd position.
+
+/// Base weighting factor applied to every correct prediction (1.00×).
+pub const WEIGHT_BASE_BPS: u64 = 10_000;
+/// Bonus factor (+0.25×) for predictions placed at least
+/// [`EARLY_PREDICTION_LEAD_SECONDS`] before the match start time.
+pub const EARLY_PREDICTION_BONUS_BPS: u64 = 2_500;
+/// Minimum lead time (seconds before `match_time`) to earn the early bonus.
+pub const EARLY_PREDICTION_LEAD_SECONDS: u64 = 3_600;
+/// Bonus factor (+0.50×) when the winning outcome was picked by strictly
+/// fewer than half of the match's predictors (an against-the-crowd pick).
+pub const UNDERDOG_BONUS_BPS: u64 = 5_000;
+
+/// Compute the weighted contribution of a single graded prediction.
+///
+/// Returns `(base, timing_bonus, underdog_bonus)` in point-basis-point units;
+/// the prediction's total contribution is the sum of the three components.
+/// The split is kept separate so the contract can expose each component for
+/// transparency (see `ParticipantScore`).
+///
+/// * `points_earned` — graded points (already includes the exact-score bonus
+///   and the match's `points_multiplier`). `0` yields `(0, 0, 0)`.
+/// * `predicted_at` / `match_time` — the early bonus applies when the
+///   prediction led the match start by at least
+///   [`EARLY_PREDICTION_LEAD_SECONDS`].
+/// * `minority_pick` — `true` when strictly fewer than half of the match's
+///   predictors chose the winning outcome.
+///
+/// Pure and deterministic: identical inputs always produce identical output,
+/// which is what makes standings recomputation idempotent.
+pub fn weighted_contribution(
+    points_earned: u32,
+    predicted_at: u64,
+    match_time: u64,
+    minority_pick: bool,
+) -> (u64, u64, u64) {
+    if points_earned == 0 {
+        return (0, 0, 0);
+    }
+    let pts = points_earned as u64;
+    let base = pts * WEIGHT_BASE_BPS;
+    let timing = if match_time.saturating_sub(predicted_at) >= EARLY_PREDICTION_LEAD_SECONDS {
+        pts * EARLY_PREDICTION_BONUS_BPS
+    } else {
+        0
+    };
+    let underdog = if minority_pick {
+        pts * UNDERDOG_BONUS_BPS
+    } else {
+        0
+    };
+    (base, timing, underdog)
+}
+
+// ---------------------------------------------------------------------------
 // MatchResult
 // ---------------------------------------------------------------------------
 
@@ -183,6 +253,14 @@ pub enum DataKey {
     // ── Canonical XLM token key (#794) ───────────────────────────────────────
     /// Current XLM token contract address — set during initialize.
     CurrentXLMToken,
+
+    // ── Weighted standings keys (#1311) ──────────────────────────────────────
+    /// A participant's accumulated weighted score components  (user, event_id)
+    ParticipantScore(Address, u64),
+
+    /// Vec<StandingEntry> ranked weighted standings snapshot for an event
+    /// (event_id). Recomputed on `submit_match_result` and `finalize_event`.
+    EventStandings(u64),
 }
 
 // ---------------------------------------------------------------------------
@@ -809,6 +887,121 @@ impl LeaderboardEntry {
 
         // Final tiebreaker: address comparison (deterministic)
         // Compare the addresses directly; Soroban Address implements Ord
+        self.user < other.user
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ParticipantScore (#1311)
+// ---------------------------------------------------------------------------
+
+/// A participant's accumulated weighted score for an event, broken into its
+/// components for transparency.
+///
+/// Invariant: `weighted_score = base_component + timing_component +
+/// underdog_component`. All weighted values are in point-basis-point units
+/// (see [`WEIGHT_BASE_BPS`] and [`weighted_contribution`]).
+///
+/// Stored under `DataKey::ParticipantScore(user, event_id)` and rebuilt from
+/// scratch on every standings recomputation, so repeated recomputation over
+/// the same graded predictions always yields the same value.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParticipantScore {
+    /// Address of the participant
+    pub user: Address,
+
+    /// Event identifier
+    pub event_id: u64,
+
+    /// Total weighted score — sum of the three components below
+    pub weighted_score: u64,
+
+    /// Σ points_earned × WEIGHT_BASE_BPS over all correct predictions
+    pub base_component: u64,
+
+    /// Σ early-prediction bonuses (see [`EARLY_PREDICTION_BONUS_BPS`])
+    pub timing_component: u64,
+
+    /// Σ against-the-crowd bonuses (see [`UNDERDOG_BONUS_BPS`])
+    pub underdog_component: u64,
+
+    /// Number of predictions graded with a correct 1X2 result
+    pub correct_count: u32,
+
+    /// Ledger timestamp at which the participant's weighted score last
+    /// increased — i.e. the `submitted_at` of the most recent match result
+    /// that added to their score. `0` when they have not scored yet.
+    /// Used as the "earliest achievement" tie-breaker: of two participants
+    /// with identical scores, the one who reached that score first ranks
+    /// higher.
+    pub achieved_at: u64,
+}
+
+impl ParticipantScore {
+    /// A zeroed score for a participant who has not scored yet.
+    pub fn zero(user: Address, event_id: u64) -> Self {
+        Self {
+            user,
+            event_id,
+            weighted_score: 0,
+            base_component: 0,
+            timing_component: 0,
+            underdog_component: 0,
+            correct_count: 0,
+            achieved_at: 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StandingEntry (#1311)
+// ---------------------------------------------------------------------------
+
+/// One row of an event's ranked weighted standings.
+///
+/// Stored in `Vec<StandingEntry>` under `DataKey::EventStandings(event_id)`,
+/// sorted best-first with ranks assigned 1..N.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StandingEntry {
+    /// Address of the participant
+    pub user: Address,
+
+    /// Event identifier
+    pub event_id: u64,
+
+    /// Total weighted score (point-basis-point units)
+    pub weighted_score: u64,
+
+    /// Number of correct predictions
+    pub correct_count: u32,
+
+    /// Timestamp the participant last increased their score (0 = never)
+    pub achieved_at: u64,
+
+    /// 1-based rank after sorting (1 is the top-ranked participant)
+    pub rank: u32,
+}
+
+impl StandingEntry {
+    /// Returns `true` if this entry outranks `other`.
+    ///
+    /// Deterministic tie-break ordering (#1311), applied in order:
+    /// 1. Higher `weighted_score` wins.
+    /// 2. On tie: higher `correct_count` wins.
+    /// 3. On tie: earlier `achieved_at` wins (reached the score first).
+    /// 4. On tie: smaller address wins (final deterministic tie-breaker).
+    pub fn outranks(&self, other: &StandingEntry) -> bool {
+        if self.weighted_score != other.weighted_score {
+            return self.weighted_score > other.weighted_score;
+        }
+        if self.correct_count != other.correct_count {
+            return self.correct_count > other.correct_count;
+        }
+        if self.achieved_at != other.achieved_at {
+            return self.achieved_at < other.achieved_at;
+        }
         self.user < other.user
     }
 }

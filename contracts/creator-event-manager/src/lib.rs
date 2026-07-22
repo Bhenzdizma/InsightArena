@@ -20,7 +20,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, String, Symbol, Vec};
 use admin::AdminError;
 use event::EventError;
 use r#match::MatchError;
-use storage_types::{Event, LeaderboardEntry, Match, Prediction};
+use storage_types::{Event, LeaderboardEntry, Match, ParticipantScore, Prediction, StandingEntry};
 use verification::VerificationError;
 use views::{EventStatistics, PlatformStatistics};
 
@@ -722,6 +722,53 @@ impl CreatorEventManagerContract {
             Ok(entries) => entries,
             Err(leaderboard::LeaderboardError::EventNotFound) => panic!("event_not_found"),
             Err(leaderboard::LeaderboardError::Overflow) => panic!("overflow"),
+        }
+    }
+
+    /// Return the stored weighted standings for an event (#1311).
+    ///
+    /// Standings weight each correct prediction by documented multipliers:
+    /// a 1.00× base on `points_earned`, +0.25× when the prediction was placed
+    /// at least one hour before the match start, and +0.50× when the winning
+    /// outcome was picked by strictly fewer than half of the match's
+    /// predictors. The snapshot is recomputed from scratch on every
+    /// `submit_match_result` and on `finalize_event`, so repeated computation
+    /// always yields identical standings.
+    ///
+    /// Tie-break ordering (deterministic, applied in order):
+    /// 1. Higher weighted score
+    /// 2. Higher correct-prediction count
+    /// 3. Earlier achievement (reached the score first)
+    /// 4. Smaller address
+    ///
+    /// Returns an empty `Vec` when no match result has been submitted yet.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_event_standings(env: Env, event_id: u64) -> Vec<StandingEntry> {
+        match leaderboard::get_event_standings(&env, event_id) {
+            Ok(standings) => standings,
+            Err(leaderboard::LeaderboardError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Return a participant's weighted score components for an event (#1311).
+    ///
+    /// Exposes the transparency breakdown behind `get_event_standings`: the
+    /// base component (`points × 1.00×`), accumulated early-prediction and
+    /// against-the-crowd bonuses, correct-prediction count, and the timestamp
+    /// the participant last increased their score. `weighted_score` always
+    /// equals the sum of the three components. Returns a zeroed score for a
+    /// user who has not scored (or not participated) yet.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_participant_score(env: Env, event_id: u64, user: Address) -> ParticipantScore {
+        match leaderboard::get_participant_score(&env, event_id, user) {
+            Ok(score) => score,
+            Err(leaderboard::LeaderboardError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
         }
     }
 

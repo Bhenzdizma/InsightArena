@@ -102,6 +102,12 @@ pub fn finalize_event(
         }
     }
 
+    // Recompute and persist the final weighted standings snapshot (#1311).
+    // Every match is resolved at this point, so this stores the definitive
+    // end-of-event standings. Payouts below intentionally remain driven by the
+    // points leaderboard.
+    leaderboard::recompute_standings(env, event_id).map_err(|_| EventError::EventNotFound)?;
+
     // Ranked, deterministic leaderboard. The event was already loaded above, so
     // the only residual error path here is an (effectively unreachable) points
     // overflow; collapse it onto EventNotFound to stay within EventError.

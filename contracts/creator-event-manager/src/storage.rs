@@ -8,7 +8,7 @@
 /// the returned ID immediately.
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::storage_types::{DataKey, Event, Match, Prediction};
+use crate::storage_types::{DataKey, Event, Match, ParticipantScore, Prediction, StandingEntry};
 
 // ---------------------------------------------------------------------------
 // TTL constant
@@ -257,6 +257,70 @@ pub fn add_event_participant(env: &Env, event_id: u64, participant: &Address) {
     let mut list = get_event_participants(env, event_id);
     list.push_back(participant.clone());
     env.storage().persistent().set(&key, &list);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);
+}
+
+// ---------------------------------------------------------------------------
+// Weighted standings helpers (#1311)
+// ---------------------------------------------------------------------------
+
+/// Read a participant's stored weighted score components, or `None` if the
+/// participant has never been scored for this event.
+pub fn get_participant_score(
+    env: &Env,
+    event_id: u64,
+    user: &Address,
+) -> Option<ParticipantScore> {
+    let key = DataKey::ParticipantScore(user.clone(), event_id);
+    match env
+        .storage()
+        .persistent()
+        .get::<DataKey, ParticipantScore>(&key)
+    {
+        Some(score) => {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);
+            Some(score)
+        }
+        None => None,
+    }
+}
+
+/// Write a participant's weighted score components and set the TTL.
+pub fn set_participant_score(env: &Env, score: &ParticipantScore) {
+    let key = DataKey::ParticipantScore(score.user.clone(), score.event_id);
+    env.storage().persistent().set(&key, score);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);
+}
+
+/// Read the stored weighted standings snapshot for an event, or an empty Vec
+/// if standings have never been computed.
+pub fn get_event_standings(env: &Env, event_id: u64) -> Vec<StandingEntry> {
+    let key = DataKey::EventStandings(event_id);
+    match env
+        .storage()
+        .persistent()
+        .get::<DataKey, Vec<StandingEntry>>(&key)
+    {
+        Some(list) => {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);
+            list
+        }
+        None => Vec::new(env),
+    }
+}
+
+/// Write the weighted standings snapshot for an event and set the TTL.
+pub fn set_event_standings(env: &Env, event_id: u64, standings: &Vec<StandingEntry>) {
+    let key = DataKey::EventStandings(event_id);
+    env.storage().persistent().set(&key, standings);
     env.storage()
         .persistent()
         .extend_ttl(&key, TTL_LEDGERS, TTL_LEDGERS);

@@ -5,11 +5,14 @@
 //! is computed on-demand (live) and can be called before all matches are resolved,
 //! with unresolved matches contributing 0 points.
 
-use soroban_sdk::{Env, Vec};
+use soroban_sdk::{Address, Env, Map, Vec};
 
 use crate::event::{self, EventError};
 use crate::storage;
-use crate::storage_types::LeaderboardEntry;
+use crate::storage_types::{
+    weighted_contribution, LeaderboardEntry, MatchResult, ParticipantScore, Prediction,
+    StandingEntry,
+};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -165,6 +168,212 @@ pub fn get_event_leaderboard(
     }
 
     Ok(entries)
+}
+
+// ---------------------------------------------------------------------------
+// Weighted standings (#1311)
+// ---------------------------------------------------------------------------
+
+/// Recompute and persist the weighted standings for an event.
+///
+/// Rebuilds every participant's [`ParticipantScore`] from scratch out of the
+/// event's graded predictions, then sorts and stores the ranked
+/// [`StandingEntry`] snapshot under `DataKey::EventStandings(event_id)`.
+/// Because the computation reads only immutable graded data (a match result
+/// can never be resubmitted), recomputing any number of times yields
+/// identical standings — the operation is idempotent.
+///
+/// # Weighting (see `storage_types` weighting constants)
+/// Each correct prediction contributes
+/// `points_earned × (base + early bonus + underdog bonus)` weighted units:
+/// * **Early**: placed ≥ `EARLY_PREDICTION_LEAD_SECONDS` before match start.
+/// * **Underdog**: strictly fewer than half of the match's predictors picked
+///   the winning outcome.
+///
+/// # Tie-break ordering (see [`StandingEntry::outranks`])
+/// weighted score ↓ → correct count ↓ → achieved_at ↑ → address ↑
+///
+/// # Bounded iteration
+/// One pass over the event's matches, and for each resolved match one pass
+/// over its predictions (loaded once per match), plus an insertion sort over
+/// the participants. Total work is O(P + M·K + P²) for P participants,
+/// M matches, and K predictions per match — all bounded by the event's own
+/// stored indexes; no unbounded scans.
+///
+/// Called from `submit_match_result` (after grading) and `finalize_event`.
+pub fn recompute_standings(
+    env: &Env,
+    event_id: u64,
+) -> Result<Vec<StandingEntry>, LeaderboardError> {
+    let _event = event::get_event(env, event_id)?;
+
+    let participants = storage::get_event_participants(env, event_id);
+
+    // Start every participant from zero — full rebuild, never incremental.
+    let mut scores: Map<Address, ParticipantScore> = Map::new(env);
+    for participant in participants.iter() {
+        scores.set(
+            participant.clone(),
+            ParticipantScore::zero(participant.clone(), event_id),
+        );
+    }
+
+    let match_ids = storage::get_event_matches(env, event_id);
+    for match_id in match_ids.iter() {
+        let m = match storage::get_match(env, match_id) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !m.result_submitted {
+            continue;
+        }
+        let (winning_team, submitted_at) = match (m.winning_team, m.submitted_at) {
+            (Some(w), Some(t)) => (w, t),
+            _ => continue,
+        };
+
+        // Load the match's predictions once, tallying picks per outcome so the
+        // underdog check needs no second storage pass.
+        let prediction_ids = storage::get_match_predictions(env, match_id);
+        let mut predictions: Vec<Prediction> = Vec::new(env);
+        let mut outcome_counts: [u32; 3] = [0, 0, 0];
+        for prediction_id in prediction_ids.iter() {
+            if let Ok(prediction) = storage::get_prediction(env, prediction_id) {
+                let outcome = MatchResult::from_scores(
+                    prediction.predicted_home_score,
+                    prediction.predicted_away_score,
+                )
+                .to_u8() as usize;
+                outcome_counts[outcome] += 1;
+                predictions.push_back(prediction);
+            }
+        }
+
+        let total_picks = predictions.len() as u64;
+        let winner_picks = *outcome_counts.get(winning_team as usize).unwrap_or(&0) as u64;
+        // Against-the-crowd: strictly fewer than half of the match's
+        // predictors chose the winning outcome.
+        let minority_pick = winner_picks * 2 < total_picks;
+
+        for prediction in predictions.iter() {
+            let points = prediction.points_earned.unwrap_or(0);
+            if points == 0 {
+                continue;
+            }
+            let mut score = match scores.get(prediction.predictor.clone()) {
+                Some(score) => score,
+                // Predictor not in the participant index — skip defensively.
+                None => continue,
+            };
+
+            let (base, timing, underdog) =
+                weighted_contribution(points, prediction.predicted_at, m.match_time, minority_pick);
+
+            score.base_component = score
+                .base_component
+                .checked_add(base)
+                .ok_or(LeaderboardError::Overflow)?;
+            score.timing_component = score
+                .timing_component
+                .checked_add(timing)
+                .ok_or(LeaderboardError::Overflow)?;
+            score.underdog_component = score
+                .underdog_component
+                .checked_add(underdog)
+                .ok_or(LeaderboardError::Overflow)?;
+            score.weighted_score = score
+                .weighted_score
+                .checked_add(base + timing + underdog)
+                .ok_or(LeaderboardError::Overflow)?;
+            score.correct_count = score
+                .correct_count
+                .checked_add(1)
+                .ok_or(LeaderboardError::Overflow)?;
+            if submitted_at > score.achieved_at {
+                score.achieved_at = submitted_at;
+            }
+
+            scores.set(prediction.predictor.clone(), score);
+        }
+    }
+
+    // Persist per-participant scores and build the standings rows.
+    let mut standings: Vec<StandingEntry> = Vec::new(env);
+    for participant in participants.iter() {
+        // Every participant was seeded above, so the lookup cannot fail.
+        let score = scores.get(participant.clone()).unwrap();
+        storage::set_participant_score(env, &score);
+        standings.push_back(StandingEntry {
+            user: participant.clone(),
+            event_id,
+            weighted_score: score.weighted_score,
+            correct_count: score.correct_count,
+            achieved_at: score.achieved_at,
+            rank: 0,
+        });
+    }
+
+    // Sort with insertion sort (stable, suitable for small participant lists).
+    let len = standings.len();
+    for i in 1..len {
+        let mut j = i;
+        while j > 0 {
+            let prev = standings.get(j - 1).unwrap();
+            let curr = standings.get(j).unwrap();
+            if prev.outranks(&curr) {
+                break;
+            }
+            standings.set(j - 1, curr);
+            standings.set(j, prev);
+            j -= 1;
+        }
+    }
+
+    // Assign 1-based ranks.
+    for i in 0..len {
+        let mut entry = standings.get(i).unwrap();
+        entry.rank = (i as u32) + 1;
+        standings.set(i, entry);
+    }
+
+    storage::set_event_standings(env, event_id, &standings);
+    Ok(standings)
+}
+
+/// Return the stored weighted standings snapshot for an event.
+///
+/// The snapshot is the one persisted by the most recent
+/// [`recompute_standings`] run (triggered by `submit_match_result` or
+/// `finalize_event`). Returns an empty `Vec` when no match result has been
+/// submitted yet.
+///
+/// # Errors
+/// * [`LeaderboardError::EventNotFound`] — no event with the given event_id.
+pub fn get_event_standings(
+    env: &Env,
+    event_id: u64,
+) -> Result<Vec<StandingEntry>, LeaderboardError> {
+    event::get_event(env, event_id)?;
+    Ok(storage::get_event_standings(env, event_id))
+}
+
+/// Return a participant's weighted score components for an event.
+///
+/// Exposes the full breakdown (base, timing bonus, underdog bonus, correct
+/// count, achievement timestamp) so anyone can verify how a weighted score
+/// was assembled. Returns a zeroed score for a participant who has not been
+/// scored yet.
+///
+/// # Errors
+/// * [`LeaderboardError::EventNotFound`] — no event with the given event_id.
+pub fn get_participant_score(
+    env: &Env,
+    event_id: u64,
+    user: Address,
+) -> Result<ParticipantScore, LeaderboardError> {
+    event::get_event(env, event_id)?;
+    Ok(storage::get_participant_score(env, event_id, &user)
+        .unwrap_or_else(|| ParticipantScore::zero(user, event_id)))
 }
 
 #[cfg(test)]
